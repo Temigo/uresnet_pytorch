@@ -19,6 +19,15 @@ class io_base(object):
     def num_channels(self):
         return self._num_channels
 
+    def stop_threads(self):
+        raise NotImplementedError
+
+    def set_index_start(self,idx):
+        raise NotImplementedError
+
+    def start_threads(self):
+        raise NotImplementedError
+
     def initialize(self):
         raise NotImplementedError
 
@@ -28,12 +37,11 @@ class io_base(object):
     def store_cluster(self, idx, group):
         raise NotImplementedError
 
-    def next(self):
+    def next(self,buffer_id=-1,release=True):
         raise NotImplementedError
 
     def finalize(self):
         raise NotImplementedError
-
         
 class io_base_sparse(io_base):
 
