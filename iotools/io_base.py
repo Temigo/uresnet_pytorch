@@ -10,6 +10,7 @@ class io_base(object):
         self._batch_size   = flags.BATCH_SIZE
         self._num_entries  = -1
         self._num_channels = -1
+        self._flags = flags
 
     def batch_size(self, size=None):
         if size is None: return self._batch_size
@@ -49,7 +50,6 @@ class io_base_sparse(io_base):
 
     def __init__(self, flags):
         super(io_base_sparse, self).__init__(flags)
-        self._batch_size   = flags.MINIBATCH_SIZE
         self._voxel        = [] # should be a list of numpy arrays
         self._feature      = [] # should be a list of numpy arrays, same length as self._voxel
         self._label        = [] # should be a list of numpy arrays, same length as self._voxel
