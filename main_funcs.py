@@ -155,7 +155,7 @@ def train_loop(flags, handlers):
     handlers.data_io.next()
     handlers.data_io.next()
     while handlers.iteration < flags.ITERATION:
-        epoch = handlers.iteration * float(flags.BATCH_SIZE) * float(flags.MINIBATCH_SIZE) / handlers.data_io.num_entries()
+        epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
         tstart_iteration = time.time()
 

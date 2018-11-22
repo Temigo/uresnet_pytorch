@@ -10,7 +10,6 @@ class io_larcv_sparse(io_base_sparse):
 
     def __init__(self, flags):
         super(io_larcv_sparse, self).__init__(flags=flags)
-        self._flags   = flags
         self._blob = {}
         self._fout    = None
         self._last_entry = -1

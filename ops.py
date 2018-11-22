@@ -19,7 +19,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         total_loss = 0
         total_acc = 0
         total_count = 0
-        for i in range(self._flags.BATCH_SIZE):
+        for i in range(len(self._flags.GPUS)):
             for b in batch_ids[i].unique():
                 batch_index = batch_ids[i] == b
                 event_segmentation = segmentation[i][batch_index]

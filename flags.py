@@ -23,7 +23,6 @@ class URESNET_FLAGS:
     SEED           = -1
     LEARNING_RATE  = 0.001
     GPUS           = [0]
-    MINIBATCH_SIZE = 1
     WEIGHT_PREFIX  = ''
     NUM_POINT      = 2048
     NUM_CHANNEL    = -1
@@ -62,8 +61,6 @@ class URESNET_FLAGS:
                             help='Iteration to run [default: %s]' % self.ITERATION)
         parser.add_argument('-bs','--batch_size', type=int, default=self.BATCH_SIZE,
                             help='Batch Size during training for updating weights [default: %s]' % self.BATCH_SIZE)
-        parser.add_argument('-mbs','--minibatch_size', type=int, default=self.MINIBATCH_SIZE,
-                            help='Mini-Batch Size during training for each GPU [default: %s]' % self.MINIBATCH_SIZE)
         parser.add_argument('-rs','--report_step', type=int, default=self.REPORT_STEP,
                             help='Period (in steps) to print out loss and accuracy [default: %s]' % self.REPORT_STEP)
         parser.add_argument('-mn','--model_name', type=str, default=self.MODEL_NAME,
