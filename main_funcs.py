@@ -109,9 +109,10 @@ def log(handlers, tstart_iteration, tsum, label, res,
     acc_seg = 0.
     if label is not None:
         acc_seg = np.mean(utils.compute_accuracy(handlers.data_io,
-                                                        [idx],
+                                                        idx,
                                                         label,
                                                         pred_seg))
+
     # Report (logger)
     tspent_iteration = time.time() - tstart_iteration
     if handlers.csv_logger:

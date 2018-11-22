@@ -5,7 +5,8 @@ import torch
 import time
 import os
 import sys
-from torch.nn.parallel import DataParallel
+# from torch.nn.parallel import DataParallel
+from ops import GraphDataParallel
 from ops import SegmentationLoss
 import models
 
@@ -56,7 +57,7 @@ class trainval(object):
         data = data_blob['data']
         label = data_blob.get('label', None)
         weight = data_blob.get('weight', None)
-        print(data[0].shape)
+
         tstart = time.time()
         with torch.set_grad_enabled(self._flags.TRAIN):
             point_cloud = [torch.as_tensor(d).cuda() for d in data]
@@ -68,16 +69,18 @@ class trainval(object):
                 weight = [torch.as_tensor(w).cuda() for w in weight]
                 for w in weight:
                     w.requires_grad = False
-
-            segmentation = self._net(point_cloud)
+            segmentation, = self._net(point_cloud)
+            if not isinstance(segmentation, list):
+                segmentation = [segmentation]
             # softmax      = self._softmax(segmentation)
             loss_seg, acc = 0., 0.
             if self._flags.TRAIN:
-                loss_seg, acc = self._criterion(segmentation, label, weight)
+                batch_ids = [p[:, 3] for p in point_cloud]
+                loss_seg, acc = self._criterion(segmentation, label, batch_ids, weight)
                 self._loss = loss_seg
             res = {
-                'segmentation': [segmentation.cpu().detach().numpy()],
-                'softmax': [self._softmax(segmentation).cpu().detach().numpy()],
+                'segmentation': [s.cpu().detach().numpy() for s in segmentation],
+                'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation],
                 'accuracy': acc,
                 'loss_seg': loss_seg.cpu().item() if not isinstance(loss_seg, float) else loss_seg
             }
@@ -98,7 +101,7 @@ class trainval(object):
         self.tspent_sum['forward'] = self.tspent_sum['train'] = self.tspent_sum['save'] = 0.
         self.tspent['forward'] = self.tspent['train'] = self.tspent['save'] = 0.
 
-        self._net = DataParallel(model(self._flags), device_ids=self._flags.GPUS)
+        self._net = GraphDataParallel(model(self._flags), device_ids=self._flags.GPUS)
 
         if self._flags.TRAIN:
             self._net.train().cuda()

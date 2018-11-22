@@ -9,7 +9,7 @@ from iotools.io_base import io_base_sparse
 class io_larcv_sparse(io_base_sparse):
 
     def __init__(self, flags):
-        super(io_larcv_sparse,self).__init__(flags=flags)
+        super(io_larcv_sparse, self).__init__(flags=flags)
         self._flags   = flags
         self._blob = {}
         self._fout    = None
@@ -46,8 +46,8 @@ class io_larcv_sparse(io_base_sparse):
         self._blob['voxels'] = []
         self._blob['feature'] = []
         for key in self._flags.DATA_KEYS:
-            ch_blob[key]=TChain('%s_%s_tree' % (dtype_keyword, key))
-            self._blob[key]=[]
+            ch_blob[key] = TChain('%s_%s_tree' % (dtype_keyword, key))
+            self._blob[key] = []
         # ch_data   = TChain('%s_%s_tree' % (dtype_keyword,self._flags.DATA_KEY))
         # ch_label  = None
         # if self._flags.LABEL_KEY:
@@ -64,9 +64,9 @@ class io_larcv_sparse(io_base_sparse):
         event_fraction = 1./ach.GetEntries() * 100.
         total_point = 0.
         for i in range(ach.GetEntries()):
-            if self._flags.LIMIT_NUM_SAMPLE > 0 and i==self._flags.LIMIT_NUM_SAMPLE:
+            if self._flags.LIMIT_NUM_SAMPLE > 0 and i == self._flags.LIMIT_NUM_SAMPLE:
                 break
-            for key,ch in ch_blob.iteritems():
+            for key, ch in ch_blob.iteritems():
                 ch.GetEntry(i)
                 if i == 0:
                     br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))

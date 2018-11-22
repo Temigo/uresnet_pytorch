@@ -40,7 +40,7 @@ class CSVData:
             self._fout.close()
 
 
-def compute_accuracy(io,idx_vv,label_vv,softmax_vv):
+def compute_accuracy(io, idx_vv, label_vv, softmax_vv):
     """
     io: iotool.io_base_sparse inherit class
     idx_v: shape=(B*MB) ... where MB = mini-batch = array of points across events
@@ -51,9 +51,9 @@ def compute_accuracy(io,idx_vv,label_vv,softmax_vv):
     for batch, idx_v in enumerate(idx_vv):
         start, end = (0, 0)
         acc_v     = np.zeros(shape=[len(idx_v)], dtype=np.float32)
-        label_v   = label_vv[batch]
+        label_v = label_vv[batch]
         softmax_v = softmax_vv[batch]
-        for i,idx in enumerate(idx_v):
+        for i, idx in enumerate(idx_v):
             voxels  = io.blob()['voxels'][idx]
             end     = start + len(voxels)
             label   = label_v[start:end, :].reshape([-1])

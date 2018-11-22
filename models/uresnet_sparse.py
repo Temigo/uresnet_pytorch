@@ -32,4 +32,4 @@ class UResNet(torch.nn.Module):
         features = [p[:, -1][:, None].float() for p in point_cloud][0]
         x = self.sparseModel((coords, features))
         x = self.linear(x)
-        return x
+        return [x]
