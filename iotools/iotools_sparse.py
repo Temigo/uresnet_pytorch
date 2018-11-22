@@ -3,8 +3,8 @@ from __future__ import division
 from __future__ import print_function
 import numpy as np
 import sys
-from io_base import io_base_sparse
-    
+from iotools.io_base import io_base_sparse
+
 
 class io_larcv_sparse(io_base_sparse):
 
@@ -71,7 +71,7 @@ class io_larcv_sparse(io_base_sparse):
                 if i == 0:
                     br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
             num_point = br_blob.values()[0].as_vector().size()
-            if num_point < self._flags.KVALUE: continue
+            # if num_point < self._flags.KVALUE: continue
 
             # ch_data.GetEntry(i)
             # if ch_label:  ch_label.GetEntry(i)

@@ -21,7 +21,15 @@ class UResNet(torch.nn.Module):
            scn.OutputLayer(dimension))
         self.linear = torch.nn.Linear(m, flags.NUM_CLASS)
 
-    def forward(self, coords, features):
+    def forward(self, point_cloud):
+        """
+        point_cloud is a list of length minibatch size (assumes mbs = 1)
+        point_cloud[0] has 3 spatial coordinates + 1 batch coordinate + 1 feature
+        shape of point_cloud[0] = (N, 4)
+        """
+        # FIXME assumes (mini)batch size 1
+        coords = [p[:, 0:-1].float() for p in point_cloud][0]
+        features = [p[:, -1][:, None].float() for p in point_cloud][0]
         x = self.sparseModel((coords, features))
         x = self.linear(x)
         return x
