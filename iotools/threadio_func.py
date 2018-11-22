@@ -8,7 +8,7 @@ def threadio_func(io_handle, thread_id):
         - voxels = [(N, 4)] * batch size
         - feature = [(N, 1)] * batch_size
         - data = [(N, 5)] * batch_size
-        - segment = [(N, 1)] * batch size
+        - label = [(N, 1)] * batch size
     where N = total number of points across minibatch_size events
     """
     num_gpus = len(io_handle._flags.GPUS)

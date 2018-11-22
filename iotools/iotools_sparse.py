@@ -3,21 +3,26 @@ from __future__ import division
 from __future__ import print_function
 import numpy as np
 import sys
-from iotools.io_base import io_base_sparse
+import threading
+import time
+from iotools.io_base import io_base
+from iotools.threadio_func import threadio_func
 
-
-class io_larcv_sparse(io_base_sparse):
+class io_larcv_sparse(io_base):
 
     def __init__(self, flags):
         super(io_larcv_sparse, self).__init__(flags=flags)
-        self._blob = {}
         self._fout    = None
         self._last_entry = -1
         self._event_keys = []
         self._metas      = []
-
-    def blob(self):
-        return self._blob
+        # For circular buffer / thread function controls
+        self._locks   = [False] * flags.NUM_THREADS
+        self._buffs   = [None ] * flags.NUM_THREADS
+        self._threads = [None ] * flags.NUM_THREADS
+        self._start_idx = [-1 ] * flags.NUM_THREADS
+        self._last_buffer_id = -1
+        self.set_index_start(0)
 
     def initialize(self):
         self._last_entry = -1
@@ -144,6 +149,50 @@ IOManager: {
             self._fout = larcv.IOManager(cfg_file.name)
             self._fout.initialize()
 
+    def set_index_start(self,idx):
+        self.stop_threads()
+        for i in range(len(self._threads)):
+            self._start_idx[i] = idx + i*self._batch_size
+
+    def start_threads(self):
+        if self._threads[0] is not None:
+            return
+        for thread_id in range(len(self._threads)):
+            print('Starting thread',thread_id)
+            self._threads[thread_id] = threading.Thread(target = threadio_func, args=[self,thread_id])
+            self._threads[thread_id].daemon = True
+            self._threads[thread_id].start()
+
+    def stop_threads(self):
+        if self._threads[0] is None:
+            return
+        for i in range(len(self._threads)):
+            while self._locks[buffer_id]:
+                time.sleep(0.000001)
+            self._buffs[i] = None
+            self._start_idx[i] = -1
+
+    def _next(self,buffer_id=-1,release=True):
+
+        if buffer_id >= len(self._locks):
+            sys.stderr.write('Invalid buffer id requested: {:d}\n'.format(buffer_id))
+            raise ValueError
+        if buffer_id < 0: buffer_id = self._last_buffer_id + 1
+        if buffer_id >= len(self._locks):
+            buffer_id = 0
+        if self._threads[buffer_id] is None:
+            sys.stderr.write('Read-thread does not exist (did you initialize?)\n')
+            raise ValueError
+        while not self._locks[buffer_id]:
+            time.sleep(0.000001)
+        res = self._buffs[buffer_id]
+        if release:
+            self._buffs[buffer_id] = None
+            self._locks[buffer_id] = False
+            self._last_buffer_id   = buffer_id
+
+        return res
+
     def store_segment(self, idx, softmax):
         from larcv import larcv
         if self._fout is None:
@@ -179,44 +228,6 @@ IOManager: {
             larcv_label = self._fout.get_data('sparse3d','label')
             vs = larcv.as_tensor3d(voxel,label,meta,-1.)
             larcv_label.set(vs,meta)
-
-        self._fout.set_id(keys[0],keys[1],keys[2])
-        self._fout.save_entry()
-
-    def store_cluster(self, idx, groups):
-        from larcv import larcv
-        if self._fout is None:
-            raise NotImplementedError
-        idx = int(idx)
-        if idx >= self.num_entries():
-            raise ValueError
-        keys = self._event_keys[idx]
-        meta = self._metas[idx]
-
-        larcv_data = self._fout.get_data('sparse3d',self._flags.DATA_KEYS[0])
-        # voxel   = self._voxel[idx]
-        # feature = self._feature[idx].reshape([-1])
-        # vs = larcv.as_tensor3d(voxel,feature,meta,0.)
-        # larcv_data.set(vs,meta)
-        data = self._blob[self._flags.DATA_KEYS[0]][idx]
-        vs = larcv.as_tensor3d(data, meta, 0.)
-        larcv_data.set(vs, meta)
-
-        pos = data[:, 0:3]
-        if isinstance(groups, list):
-            for i, g in enumerate(groups):
-                group, name = g
-                group = np.concatenate([pos, group], axis=1)
-
-                larcv_group = self._fout.get_data('sparse3d', name)
-                vs = larcv.as_tensor3d(group, meta, -1.)
-                larcv_group.set(vs, meta)
-        else:
-            group = np.concatenate([pos, groups], axis=1)
-
-            larcv_group = self._fout.get_data('sparse3d', 'prediction')
-            vs = larcv.as_tensor3d(group, meta, -1.)
-            larcv_group.set(vs, meta)
 
         self._fout.set_id(keys[0],keys[1],keys[2])
         self._fout.save_entry()
