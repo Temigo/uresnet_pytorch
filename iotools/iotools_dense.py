@@ -159,9 +159,9 @@ class io_larcv_dense(io_base):
         blob = {}
         for key in self._flags.DATA_KEYS:
             blob[key] = self._ihandler.fetch_data(key)
-
+        idx = self._ihandler.fetch_entries()
         self._next_counter += 1
-        return blob
+        return idx, blob
 
     def finalize(self):
         self._ihandler.reset()
