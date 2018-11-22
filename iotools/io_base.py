@@ -1,6 +1,8 @@
 import threading
 import time
 import sys
+from threadio_func import threadio_func
+
 
 class io_base(object):
 

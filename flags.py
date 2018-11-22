@@ -6,7 +6,7 @@ from main_funcs import train, iotest, inference
 from distutils.util import strtobool
 
 
-class NUNET_FLAGS:
+class URESNET_FLAGS:
 
     # flags for model
     NUM_CLASS  = 2
@@ -147,19 +147,11 @@ class NUNET_FLAGS:
         # self.GPUS = [int(gpu) for gpu in self.GPUS.split(',')]
         self.INPUT_FILE=[str(f) for f in self.INPUT_FILE.split(',')]
         self.DATA_KEYS=self.DATA_KEYS.split(',')
-        if self.EDGE_CONV_FILTERS.find(',')>0:
-            self.EDGE_CONV_FILTERS = [int(v) for v in self.EDGE_CONV_FILTERS.split(',')]
-        else:
-            self.EDGE_CONV_FILTERS = int(self.EDGE_CONV_FILTERS)
-        if self.FC_FILTERS.find(',')>0:
-            self.FC_FILTERS = [int(v) for v in self.FC_FILTERS.split(',')]
-        else:
-            self.FC_FILTERS = int(self.FC_FILTERS)
         if self.SEED < 0:
             import time
             self.SEED = int(time.time())
 
 
 if __name__ == '__main__':
-    flags = NUNET_FLAGS()
+    flags = URESNET_FLAGS()
     flags.parse_args()
