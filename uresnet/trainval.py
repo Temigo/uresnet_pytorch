@@ -5,11 +5,9 @@ import torch
 import time
 import os
 import sys
-# from torch.nn.parallel import DataParallel
-from ops import GraphDataParallel
-from ops import SegmentationLoss
-import models
-
+from uresnet.ops import GraphDataParallel
+import uresnet.models as models
+import uresnet.utils as utils
 
 class trainval(object):
     def __init__(self, flags):
@@ -38,7 +36,9 @@ class trainval(object):
     def train_step(self, data_blob,
                    display_intermediate=True, epoch=None):
         tstart = time.time()
+        utils.print_memory('before forward')
         res = self.forward(data_blob, display_intermediate, epoch)
+        utils.print_memory('after forward before backward')
         self.backward()
         # torch.cuda.empty_cache()
         self.tspent['train'] = time.time() - tstart
@@ -60,24 +60,30 @@ class trainval(object):
 
         tstart = time.time()
         with torch.set_grad_enabled(self._flags.TRAIN):
-            point_cloud = [torch.as_tensor(d).cuda() for d in data]
+            # Segmentation
+            utils.print_memory('before net')
+            data = [torch.as_tensor(d).cuda() for d in data]
+            segmentation, = self._net(data)
+            utils.print_memory('after net')
+            if not isinstance(segmentation, list):
+                segmentation = [segmentation]
+            
+            # If label is given, compute the loss
+            loss_seg, acc = 0., 0.
             if label is not None:
                 label = [torch.as_tensor(l).cuda() for l in label]
                 for l in label:
                     l.requires_grad = False
-            if weight is not None:
-                weight = [torch.as_tensor(w).cuda() for w in weight]
-                for w in weight:
-                    w.requires_grad = False
-            segmentation, = self._net(point_cloud)
-            if not isinstance(segmentation, list):
-                segmentation = [segmentation]
-            # softmax      = self._softmax(segmentation)
-            loss_seg, acc = 0., 0.
-            if self._flags.TRAIN:
-                batch_ids = [p[:, 3] for p in point_cloud]
-                loss_seg, acc = self._criterion(segmentation, label, batch_ids, weight)
-                self._loss = loss_seg
+                # Weight is optional for loss
+                if weight is not None:
+                    weight = [torch.as_tensor(w).cuda() for w in weight]
+                    for w in weight:
+                        w.requires_grad = False
+                utils.print_memory('before loss')
+                loss_seg, acc = self._criterion(segmentation, data, label, weight)
+                utils.print_memory('after loss')
+                if self._flags.TRAIN:
+                    self._loss = loss_seg
             res = {
                 'segmentation': [s.cpu().detach().numpy() for s in segmentation],
                 'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation],
@@ -93,8 +99,10 @@ class trainval(object):
         model = None
         if self._flags.MODEL_NAME == 'uresnet_sparse':
             model = models.SparseUResNet
+            self._criterion = models.SparseSegmentationLoss(self._flags).cuda()
         elif self._flags.MODEL_NAME == 'uresnet_dense':
             model = models.DenseUResNet
+            self._criterion = models.DenseSegmentationLoss(self._flags).cuda()
         else:
             raise Exception("Unknown model name provided")
 
@@ -111,7 +119,7 @@ class trainval(object):
         self._optimizer = torch.optim.Adam(self._net.parameters(), lr=self._flags.LEARNING_RATE)
         self._softmax = torch.nn.LogSoftmax(dim=1)
 
-        self._criterion = SegmentationLoss(self._flags).cuda()
+        #self._criterion = SegmentationLoss(self._flags).cuda()
 
         iteration = 0
         if self._flags.MODEL_PATH:

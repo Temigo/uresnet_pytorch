@@ -1,8 +1,11 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import torch
 import numpy as np
 import argparse
 import os
-from main_funcs import train, iotest, inference
+from uresnet.main_funcs import train, iotest, inference
 from distutils.util import strtobool
 
 

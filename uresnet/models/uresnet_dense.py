@@ -1,3 +1,6 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,7 +21,7 @@ def padding(kernel, stride, input_size):
         p = max(kernel - stride, 0)
     else:
         p = max(kernel - (input_size[-1] % stride), 0)
-    p1 = p // 2
+    p1 = int(p // 2)
     p2 = p - p1
     return (p1, p2,) * (len(input_size) - 2)
 
@@ -109,11 +112,12 @@ class UResNet(nn.Module):
         super(UResNet, self).__init__()
         # Parameters
         self._flags = flags
-        fn_conv, fn_conv_transpose, batch_norm = get_conv(is_3d)
         self.is_3d = flags.DATA_DIM == 3
+        fn_conv, fn_conv_transpose, batch_norm = get_conv(self.is_3d)
         self.base_num_outputs = flags.URESNET_FILTERS
-        self._num_strides = flags.URESNET_NUM_STRIDES
+        self.num_strides = flags.URESNET_NUM_STRIDES
         self.num_inputs = 1  # number of channels of input image
+        self.image_size = flags.SPATIAL_SIZE
         self.num_classes = flags.NUM_CLASS
 
         # Define layers
@@ -131,7 +135,7 @@ class UResNet(nn.Module):
         # Encoding steps
         self.double_resnet = nn.ModuleList()
         current_num_outputs = self.base_num_outputs
-        for step in xrange(self._num_strides):
+        for step in xrange(self.num_strides):
             self.double_resnet.append(DoubleResnet(
                 is_3d = self.is_3d,
                 num_inputs = current_num_outputs,
@@ -144,27 +148,27 @@ class UResNet(nn.Module):
         # Decoding steps
         self.decode_conv = nn.ModuleList()
         self.decode_double_resnet = nn.ModuleList()
-        for step in xrange(self._num_strides):
+        for step in xrange(self.num_strides):
             self.decode_double_resnet.append(DoubleResnet(
                 is_3d = self.is_3d,
                 num_inputs = current_num_outputs,
-                num_outputs = current_num_outputs / 2,
+                num_outputs = int(current_num_outputs / 2),
                 kernel = 3,
                 stride = 1
             ))
             self.decode_conv.append(torch.nn.Sequential(
                 fn_conv_transpose(
                     in_channels = current_num_outputs,
-                    out_channels = current_num_outputs / 2,
+                    out_channels = int(current_num_outputs / 2),
                     kernel_size = 3,
                     stride = 2,
                     padding=1,
                     output_padding=1
                 ),
-                batch_norm(num_features=current_num_outputs / 2),
+                batch_norm(num_features=int(current_num_outputs / 2)),
                 torch.nn.ReLU()
             ))
-            current_num_outputs /= 2
+            current_num_outputs = int(current_num_outputs / 2)
 
         self.conv2 = torch.nn.Sequential(
             fn_conv(
@@ -191,15 +195,16 @@ class UResNet(nn.Module):
 
     def forward(self, input):
         conv_feature_map = {}
+        #net = input.view(-1,self.num_inputs,self.image_size,self.image_size,self.image_size)
         net = F.pad(input, padding(self.conv1[0].kernel_size[0], self.conv1[0].stride[0], input.size()), mode='replicate')
         net = self.conv1(net)
         conv_feature_map[net.size()[1]] = net
         # Encoding steps
-        for step in xrange(self._num_strides):
+        for step in xrange(self.num_strides):
             net = self.double_resnet[step](net)
             conv_feature_map[net.size()[1]] = net
         # Decoding steps
-        for step in xrange(self._num_strides):
+        for step in xrange(self.num_strides):
             # num_outputs = net.size()[1] / 2
             net = self.decode_conv[step](net)
             net = torch.cat((net, conv_feature_map[net.size()[1]]), dim=1)
@@ -210,3 +215,42 @@ class UResNet(nn.Module):
         net = F.pad(net, padding(self.conv3[0].kernel_size[0], self.conv3[0].stride[0], net.size()), mode='replicate')
         net = self.conv3(net)
         return net
+
+class SegmentationLoss(torch.nn.modules.loss._Loss):
+
+    #def __init__(self, flags, size_average=False):
+    #    super(SegmentationLoss, self).__init__(size_average)
+    def __init__(self, flags, reduction='sum'):
+        super(SegmentationLoss, self).__init__(reduction=reduction)
+        self._flags = flags
+        self.cross_entropy = torch.nn.CrossEntropyLoss(reduction='none')
+
+    def forward(self, segmentation, data, label, weight):
+        total_loss = 0.
+        total_acc = 0.
+
+        for i in range(len(self._flags.GPUS)):
+            event_data = data[i]
+            nonzero_idx = data[i] > 0.000001
+            event_segmentation = segmentation[i].unsqueeze(0)
+            event_label = label[i].squeeze(0).unsqueeze(0).long()
+            loss = self.cross_entropy(event_segmentation,event_label)
+            if weight is not None:
+                loss *= weight[i]
+            #print(event_segmentation.sum().item())
+            #print(event_label.sum().item())
+            #print(loss.sum().item())
+            prediction = torch.argmax(event_segmentation,dim=1).squeeze(1)
+            acc = (prediction == event_label)[nonzero_idx].sum().item() / float(nonzero_idx.long().sum().item())
+
+            loss *= nonzero_idx.float()
+            loss = loss.sum() / nonzero_idx.long().sum()
+            
+            total_loss += loss
+            total_acc += acc
+            
+        total_loss = total_loss / float(len(self._flags.GPUS))
+        total_acc = total_acc / float(len(self._flags.GPUS))
+
+        return total_loss, total_acc
+

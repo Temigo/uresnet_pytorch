@@ -1,37 +1,46 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import tempfile
-from io_base import io_base
+import numpy as np
+from uresnet.iotools.io_base import io_base
 
 def make_input_larcv_cfg(flags):
-    input_filelist = ''
+    input_filelist = 'InputFiles: ['
     for i,f in enumerate(flags.INPUT_FILE):
         input_filelist += '"%s"' % f
         if (i+1) < len(flags.INPUT_FILE):
             input_filelist += ','
-    weight_proc = ''
-    weight_name = ''
-    weight_cfg  = ''
-    if len(self._flags.DATA_KEYS)>=3:
-        weight_cfg = 'weight: { Tensor3DProducer: "%s" }' % self._flags.DATA_KEYS[2]
-        weight_proc = ',"BatchFillerTensor3D"'
-        weight_name = ',"weight"'
+    input_filelist += ']'
+    proctypes = '    ProcessType: ['
+    procnames = '    ProcessName: ['
+    proccfg = ''
+    for i,key in enumerate(flags.DATA_KEYS):
+        proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
+        procnames += '"%s",' % key
+        proccfg += ' %s: { Tensor%dDProducer: "%s" }\n' % (key,flags.DATA_DIM,key)
+    proctypes=proctypes[0:proctypes.rfind(',')] + ']'
+    procnames=procnames[0:procnames.rfind(',')] + ']'
+
+    random = 0
+    if flags.SHUFFLE: random=2
+
     cfg = '''
 MainIO: {
-   Verbosity:    2
-   EnableFilter: true
-   RandomAccess: %d
-   InputFiles: [%s]
-   ProcessType:  ["BatchFillerTensor3D","BatchFillerTensor3D"%s]
-   ProcessName:  ["data","label"%s]
-   NumThreads: 4
-   NumBatchStorage: 8
-   ProcessList: {
-       data:  { Tensor3DProducer: "%s" }
-      label:  { Tensor3DProducer: "%s" }
-     %s
-   }
+    Verbosity:    2
+    EnableFilter: true
+    RandomAccess: %d
+    %s
+    %s
+    %s
+    NumThreads: 4
+    NumBatchStorage: 8
+    ProcessList: {
+       %s
+    }
 }
 '''
-    cfg = cfg % (flags.SHUFFLE,input_filelist, weight_proc, weight_name, flags.DATA_KEYS[0], flags.DATA_KEYS[1], weight_cfg)
+    cfg = cfg % (random,input_filelist, proctypes, procnames, proccfg)
     cfg_file = tempfile.NamedTemporaryFile('w')
     cfg_file.write(cfg)
     cfg_file.flush()
@@ -48,8 +57,8 @@ def make_output_larcv_cfg(flags):
         if (i+1) < len(flags.INPUT_FILE):
             input_filelist += ','
 
-    readonlyname = 'ReadOnlyType: ['
-    readonlytype = 'ReadOnlyName: ['
+    readonlyname = 'ReadOnlyName: ['
+    readonlytype = 'ReadOnlyType: ['
     for i,key in enumerate(flags.DATA_KEYS):
         readonlyname += '"%s"' % key
         if flags.DATA_DIM == 2:
@@ -72,7 +81,7 @@ IOManager: {
       %s
     }
 '''
-    cfg = cfg % (input_filelist,flags.OUTPUT_FILE,readonlytype,readonlyname)
+    cfg = cfg % (flags.OUTPUT_FILE,input_filelist,readonlytype,readonlyname)
     cfg_file = tempfile.NamedTemporaryFile('w')
     cfg_file.write(cfg)
     cfg_file.flush()
@@ -82,26 +91,22 @@ class io_larcv_dense(io_base):
 
     def __init__(self,flags):
         super(io_larcv_dense,self).__init__(flags=flags)
-        self._flags   = flags
-        self._blob = {}
         self._fout    = None
-        self._last_entry = -1
-        self._event_keys = []
-        self._metas      = []
 
     def initialize(self):
-
+        from larcv import larcv
+        from larcv.dataloader2 import larcv_threadio
         self._input_cfg = make_input_larcv_cfg(self._flags)
         cfg = {'filler_name' : 'MainIO',
                'verbosity'   : 0,
                'filler_cfg'  : self._input_cfg.name}
         self._ihandler = larcv_threadio()
         self._ihandler.configure(cfg)
-        self._ihandler.start_manager(self._flags.MINIBATCH_SIZE)
-        self.next(store_entries=True,store_event_ids=True)
+        self._ihandler.start_manager(self.batch_size())
+        self._ihandler.next(store_entries=True,store_event_ids=True)
         self._next_counter = 0
         self._num_entries = self._ihandler._proc.pd().io().get_n_entries()
-        self._num_channels = self._input_main.fetch_data(self._flags.DATA_KEYS[0]).dim()[-1]
+        self._num_channels = self._ihandler.fetch_data(self._flags.DATA_KEYS[0]).dim()[-1]
         
         if self._flags.OUTPUT_FILE:
             self._output_cfg = make_output_larcv_cfg(self._flags)
@@ -115,9 +120,13 @@ class io_larcv_dense(io_base):
         self._ihandler.set_next_index(idx)
 
     def start_threads(self):
-        self._ihandler.start_manager(self._flags.MINIBATCH_SIZE)
+        self._ihandler.start_manager(self.batch_size())
 
-    def store_segment(self, idx, group):
+    def store_segment(self, idx_v, data_v, softmax_v):
+        for i,idx in enumerate(idx_v):
+            self.store_one_segment(idx,data_v[i],softmax_v[i])
+
+    def store_one_segment(self, idx, data, softmax):
         from larcv import larcv
         if self._fout is None:
             return
@@ -127,8 +136,7 @@ class io_larcv_dense(io_base):
         self._fout.read_entry(idx)
 
         datatype = 'sparse2d'
-        meta=None
-        to_voxelset = None
+        meta,to_voxelset=(None,None)
         if self._flags.DATA_DIM == 2:
             datatype = 'sparse2d'
             meta = self._fout.get_data(datatype,self._flags.DATA_KEYS[0]).as_vector().front().meta()
@@ -137,29 +145,36 @@ class io_larcv_dense(io_base):
             datatype = 'sparse3d'
             meta = self._fout.get_data(datatype,self._flags.DATA_KEYS[0]).meta()
             to_voxelset = larcv.as_tensor3d
-            
-        score = np.max(softmax,axis=1).reshape([-1])
-        prediction = np.argmax(softmax,axis=1).astype(np.float32).reshape([-1])
 
+        nonzero = (data > 0).astype(np.float32).squeeze(0)
+        score = np.max(softmax,axis=0) * nonzero
+        prediction = np.argmax(softmax,axis=0).astype(np.float32) * nonzero
+        
         larcv_softmax = self._fout.get_data(datatype,'softmax')
-        vs = to_voxelset(voxel,score,meta,-1.)
+        vs = to_voxelset(score)
         larcv_softmax.set(vs,meta)
 
         larcv_prediction = self._fout.get_data(datatype,'prediction')
-        vs = to_voxelset(voxel,prediction,meta,-1.)
+        vs = to_voxelset(prediction)
         larcv_prediction.set(vs,meta)
 
         self._fout.save_entry()
 
-    def next(self,buffer_id=-1,release=True):
-        
+    def _next(self,buffer_id=-1,release=True):
+        import numpy as np
         if self._next_counter:
             self._ihandler.next(store_entries=True,store_event_ids=True)
             
         blob = {}
         for key in self._flags.DATA_KEYS:
-            blob[key] = self._ihandler.fetch_data(key)
-        idx = self._ihandler.fetch_entries()
+            data = self._ihandler.fetch_data(key)
+            dim  = data.dim()
+            data = data.data().reshape(dim)
+            blob[key] = np.array(np.swapaxes(np.swapaxes(np.swapaxes(data,4,3),3,2),2,1))
+            #blob[key] = []
+            #for gpu in range(len(self._flags.GPUS)):
+            #    blob[key].append(data[gpu*self.batch_per_gpu():(gpu+1)*self.batch_per_gpu()])
+        idx = np.array(self._ihandler.fetch_entries())
         self._next_counter += 1
         return idx, blob
 

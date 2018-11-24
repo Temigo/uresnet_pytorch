@@ -1,3 +1,12 @@
+# typical files made in repo
+log
+weights
+*.txt
+*.csv
+*.root
+*.hdf5
+*.h5
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

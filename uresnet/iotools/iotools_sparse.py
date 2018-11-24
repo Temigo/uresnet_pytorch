@@ -5,15 +5,86 @@ import numpy as np
 import sys
 import threading
 import time
-from iotools.io_base import io_base
-from iotools.threadio_func import threadio_func
+from uresnet.iotools.io_base import io_base
+
+def threadio_func(io_handle, thread_id):
+    """
+    Structure of returned blob:
+        - voxels = [(N, 4)] * batch size
+        - feature = [(N, 1)] * batch_size
+        - data = [(N, 5)] * batch_size
+        - label = [(N, 1)] * batch size
+    where N = total number of points across minibatch_size events
+    """
+    num_gpus = len(io_handle._flags.GPUS)
+    batch_size = io_handle.batch_size()
+    batch_per_gpu = io_handle.batch_per_gpu()
+    while 1:
+        time.sleep(0.000001)
+        while not io_handle._locks[thread_id]:
+            idx_v     = []
+            voxel_v   = []
+            feature_v = []
+            new_idx_v = []
+            # label_v   = []
+            blob = {}
+            for key, val in io_handle.blob().iteritems():
+                blob[key] = []
+            if io_handle._flags.SHUFFLE:
+                idx_v = np.random.random([batch_size])*io_handle.num_entries()
+                idx_v = idx_v.astype(np.int32)
+                # for key, val in io_handle.blob().iteritems():
+                #     blob[key] = val  # fixme start, val?
+            else:
+                start = io_handle._start_idx[thread_id]
+                end   = start + batch_size
+                if end < io_handle.num_entries():
+                    idx_v = np.arange(start,end)
+                    # for key, val in io_handle.blob().iteritems():
+                    #     blob[key] = val[start:end]
+                else:
+                    idx_v = np.arange(start, io_handle.num_entries())
+                    idx_v = np.concatenate([idx_v,np.arange(0,end-io_handle.num_entries())])
+                    # for key, val in io_handle.blob().iteritems():
+                    #     blob[key] = val[start:] + val[0:end-io_handle.num_entries()]
+                next_start = start + len(io_handle._threads) * batch_size
+                if next_start >= io_handle.num_entries():
+                    next_start -= io_handle.num_entries()
+                io_handle._start_idx[thread_id] = next_start
+
+            for i in range(num_gpus):
+                voxel_v.append([])
+                feature_v.append([])
+                new_idx_v.append([])
+                for key in io_handle._flags.DATA_KEYS:
+                    blob[key].append([])
+
+            for data_id, idx in enumerate(idx_v):
+                voxel  = io_handle.blob()['voxels'][idx]
+                new_id = int(data_id / batch_per_gpu)
+                voxel_v[new_id].append(np.pad(voxel, [(0,0),(0,1)],'constant',constant_values=data_id))
+                feature_v[new_id].append(io_handle.blob()['feature'][idx])
+                new_idx_v[new_id].append(idx)
+                for key in io_handle._flags.DATA_KEYS:
+                    blob[key][new_id].append(io_handle.blob()[key][idx])
+                # if len(io_handle._label):
+                #     label_v.append(io_handle._label[idx])
+            blob['voxels']  = [np.vstack(voxel_v[i]) for i in range(num_gpus)]
+            blob['feature'] = [np.vstack(feature_v[i]) for i in range(num_gpus)]
+            new_idx_v = [np.array(x) for x in new_idx_v]
+            # if len(label_v): label_v = np.hstack(label_v)
+            for key in io_handle._flags.DATA_KEYS:
+                blob[key] = [np.vstack(minibatch) for minibatch in blob[key]]
+            blob[io_handle._flags.DATA_KEYS[0]] = [np.concatenate([blob['voxels'][i], blob['feature'][i]], axis=1) for i in range(num_gpus)]
+            io_handle._buffs[thread_id] = (new_idx_v, blob)
+            io_handle._locks[thread_id] = True
+    return
 
 class io_larcv_sparse(io_base):
 
     def __init__(self, flags):
         super(io_larcv_sparse, self).__init__(flags=flags)
         self._fout    = None
-        self._last_entry = -1
         self._event_keys = []
         self._metas      = []
         # For circular buffer / thread function controls
@@ -25,7 +96,6 @@ class io_larcv_sparse(io_base):
         self.set_index_start(0)
 
     def initialize(self):
-        self._last_entry = -1
         self._event_keys = []
         self._metas = []
         # configure the input
@@ -193,7 +263,19 @@ IOManager: {
 
         return res
 
-    def store_segment(self, idx, softmax):
+    def store_segment(self,idx_vv,data_vv,softmax_vv):
+        for batch,idx_v in enumerate(idx_vv):
+            start,end = (0,0)
+            softmax_v = softmax_vv[batch]
+            for i,idx in enumerate(idx_v):
+                voxels = self.blob()['voxels'][idx]
+                end    = start + len(voxels)
+                softmax = softmax_v[start:end,:]
+                start = end
+                self.store_one_segment(idx,softmax)
+            start = end
+    
+    def store_one_segment(self, idx, softmax):
         from larcv import larcv
         if self._fout is None:
             return
@@ -222,13 +304,12 @@ IOManager: {
         vs = larcv.as_tensor3d(voxel,prediction,meta,-1.)
         larcv_prediction.set(vs,meta)
 
-        if len(self._label) > 0:
-            label = self._label[idx]
+        if len(self._flags.DATA_KEYS) > 1:
+            label = self.blob()[self._flags.DATA_KEYS[1]][idx]
             label = label.astype(np.float32).reshape([-1])
             larcv_label = self._fout.get_data('sparse3d','label')
             vs = larcv.as_tensor3d(voxel,label,meta,-1.)
             larcv_label.set(vs,meta)
-
         self._fout.set_id(keys[0],keys[1],keys[2])
         self._fout.save_entry()
 

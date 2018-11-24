@@ -6,9 +6,9 @@ import time
 import datetime
 import sys
 import numpy as np
-from iotools import io_factory
-from trainval import trainval
-import utils
+from uresnet.iotools import io_factory
+from uresnet.trainval import trainval
+import uresnet.utils as utils
 import torch
 
 
@@ -106,12 +106,7 @@ def log(handlers, tstart_iteration, tsum, label, res,
 
     pred_seg = res['segmentation']
     loss_seg = res['loss_seg']
-    acc_seg = 0.
-    if label is not None:
-        acc_seg = np.mean(utils.compute_accuracy(handlers.data_io,
-                                                        idx,
-                                                        label,
-                                                        pred_seg))
+    acc_seg  = res['accuracy']
 
     # Report (logger)
     tspent_iteration = time.time() - tstart_iteration
@@ -134,20 +129,23 @@ def log(handlers, tstart_iteration, tsum, label, res,
 
     # Report (stdout)
     if report_step:
-        loss_seg   = utils.round_decimals(loss_seg,   4)
+        loss_seg = utils.round_decimals(loss_seg,   4)
         tmap  = handlers.trainer.tspent
         tfrac = utils.round_decimals(tmap['train']/tspent_iteration*100., 2)
         tabs  = utils.round_decimals(tmap['train'], 3)
         epoch = utils.round_decimals(epoch, 2)
         mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
-        msg = 'Iter. %d (epoch %g) @ %s ... ttrain %g%% (%g [s]) mem. %g GB \n'
-        msg = msg % (handlers.iteration, epoch, tstamp_iteration, tfrac, tabs, mem)
+        if flags.TRAIN:
+            msg = 'Iter. %d (epoch %g) @ %s ... train time %g%% (%g [s]) mem. %g GB \n'
+            msg = msg % (handlers.iteration, epoch, tstamp_iteration, tfrac, tabs, mem)
+        else:
+            msg = 'Iter. %d (epoch %g) @ %s ... forward time %g%% (%g [s]) mem. %g GB \n'
+            msg = msg % (handlers.iteration, epoch, tstamp_iteration, tfrac, tabs, mem)
         msg += '   Segmentation: loss %g accuracy %g\n' % (loss_seg, acc_seg)
         print(msg)
         sys.stdout.flush()
         if handlers.csv_logger: handlers.csv_logger.flush()
         if handlers.train_logger: handlers.train_logger.flush()
-
 
 def train_loop(flags, handlers):
     data_key, label_key, weight_key = get_keys(flags)
@@ -171,7 +169,9 @@ def train_loop(flags, handlers):
             data_blob['weight'] = blob[weight_key]
 
         # Train step
+        utils.print_memory('before train_step')
         res = handlers.trainer.train_step(data_blob, epoch=float(epoch))
+        utils.print_memory('after train_step')
 
         # Save snapshot
         tspent_save = 0.
@@ -185,7 +185,7 @@ def train_loop(flags, handlers):
         # Increment iteration counter
         handlers.iteration += 1
 
-    # handlers.train_logger.close()
+    # Finalize
     if handlers.csv_logger:
         handlers.csv_logger.close()
     handlers.data_io.finalize()
@@ -213,24 +213,14 @@ def inference_loop(flags, handlers):
         segmentations = res.get('segmentation', None)
         # Store output if requested
         if flags.OUTPUT_FILE:
-            groups = [(segmentations[0].reshape([-1, 1]).astype(np.float32), 'segmentation')]
-            if label_key is not None:
-                groups.append((data_blob['label'][0].reshape([-1, 1]).astype(np.float32), 'label'))
-            # for i, (tensor, name) in enumerate(res['tensors']):
-            #     groups.append((tensor[0, 0, :].reshape([-1, 1]), name))
-            handlers.data_io.store_cluster(idx[0], groups)
-
-            if label_key is not None:
-                acc, softmax = utils.store_segmentation(handlers.data_io,
-                                                              [idx],
-                                                              data_blob['label'],
-                                                              segmentations)
+            handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
 
         epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         log(handlers, tstart_iteration, tsum, data_blob['label'], res,
             flags, idx, epoch, tstamp_iteration)
         handlers.iteration += 1
 
+    # Finalize
     if handlers.csv_logger:
         handlers.csv_logger.close()
     handlers.data_io.finalize()

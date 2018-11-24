@@ -1,3 +1,6 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import sys
 import time
 
@@ -55,13 +58,8 @@ class io_base(object):
     def _next(self,buffer_id=-1,release=True):
         raise NotImplementedError
     
-    def store_segment(self, idx, group):
+    def store_segment(self, idx, data, softmax):
         raise NotImplementedError
 
     def finalize(self):
         raise NotImplementedError
-        
-class io_base_sparse(io_base):
-
-    def __init__(self, flags):
-        super(io_base_sparse, self).__init__(flags)
