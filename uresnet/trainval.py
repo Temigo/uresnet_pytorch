@@ -36,9 +36,7 @@ class trainval(object):
     def train_step(self, data_blob,
                    display_intermediate=True, epoch=None):
         tstart = time.time()
-        utils.print_memory('before forward')
         res = self.forward(data_blob, display_intermediate, epoch)
-        utils.print_memory('after forward before backward')
         self.backward()
         # torch.cuda.empty_cache()
         self.tspent['train'] = time.time() - tstart
@@ -61,10 +59,8 @@ class trainval(object):
         tstart = time.time()
         with torch.set_grad_enabled(self._flags.TRAIN):
             # Segmentation
-            utils.print_memory('before net')
             data = [torch.as_tensor(d).cuda() for d in data]
             segmentation, = self._net(data)
-            utils.print_memory('after net')
             if not isinstance(segmentation, list):
                 segmentation = [segmentation]
             
@@ -79,9 +75,7 @@ class trainval(object):
                     weight = [torch.as_tensor(w).cuda() for w in weight]
                     for w in weight:
                         w.requires_grad = False
-                utils.print_memory('before loss')
                 loss_seg, acc = self._criterion(segmentation, data, label, weight)
-                utils.print_memory('after loss')
                 if self._flags.TRAIN:
                     self._loss = loss_seg
             res = {

@@ -12,13 +12,17 @@ def make_input_larcv_cfg(flags):
         if (i+1) < len(flags.INPUT_FILE):
             input_filelist += ','
     input_filelist += ']'
-    proctypes = '    ProcessType: ['
-    procnames = '    ProcessName: ['
+    proctypes = '    ProcessType: ["EmptyTensorFilter",'
+    procnames = '    ProcessName: ["EmptyTensorFilter",'
     proccfg = ''
     for i,key in enumerate(flags.DATA_KEYS):
         proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
         procnames += '"%s",' % key
-        proccfg += ' %s: { Tensor%dDProducer: "%s" }\n' % (key,flags.DATA_DIM,key)
+        if i == 1:
+            # special treatment for "label" 
+            proccfg += ' %s: { Tensor%dDProducer: "%s" EmptyVoxelValue: %d }\n' % (key,flags.DATA_DIM,key,flags.NUM_CLASS-1)
+        else:
+            proccfg += ' %s: { Tensor%dDProducer: "%s" }\n' % (key,flags.DATA_DIM,key)
     proctypes=proctypes[0:proctypes.rfind(',')] + ']'
     procnames=procnames[0:procnames.rfind(',')] + ']'
 
@@ -36,11 +40,12 @@ MainIO: {
     NumThreads: 4
     NumBatchStorage: 8
     ProcessList: {
+       EmptyTensorFilter: { MinVoxel3DCount: 10 Tensor3DProducer: "%s" }
        %s
     }
 }
 '''
-    cfg = cfg % (random,input_filelist, proctypes, procnames, proccfg)
+    cfg = cfg % (random,input_filelist, proctypes, procnames, flags.DATA_KEYS[0], proccfg)
     cfg_file = tempfile.NamedTemporaryFile('w')
     cfg_file.write(cfg)
     cfg_file.flush()

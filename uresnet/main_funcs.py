@@ -169,9 +169,7 @@ def train_loop(flags, handlers):
             data_blob['weight'] = blob[weight_key]
 
         # Train step
-        utils.print_memory('before train_step')
         res = handlers.trainer.train_step(data_blob, epoch=float(epoch))
-        utils.print_memory('after train_step')
 
         # Save snapshot
         tspent_save = 0.
