@@ -37,8 +37,8 @@ MainIO: {
     %s
     %s
     %s
-    NumThreads: 4
-    NumBatchStorage: 8
+    NumThreads: 2
+    NumBatchStorage: 2
     ProcessList: {
        EmptyTensorFilter: { MinVoxel3DCount: 10 Tensor3DProducer: "%s" }
        %s
