@@ -12,20 +12,34 @@ def make_input_larcv_cfg(flags):
         if (i+1) < len(flags.INPUT_FILE):
             input_filelist += ','
     input_filelist += ']'
-    proctypes = '    ProcessType: ["EmptyTensorFilter",'
-    procnames = '    ProcessName: ["EmptyTensorFilter",'
-    proccfg = ''
-    for i,key in enumerate(flags.DATA_KEYS):
-        proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
-        procnames += '"%s",' % key
-        if i == 1:
-            # special treatment for "label" 
-            proccfg += ' %s: { Tensor%dDProducer: "%s" EmptyVoxelValue: %d }\n' % (key,flags.DATA_DIM,key,flags.NUM_CLASS-1)
-        else:
-            proccfg += ' %s: { Tensor%dDProducer: "%s" }\n' % (key,flags.DATA_DIM,key)
+    proctypes = 'ProcessType: ['
+    procnames = 'ProcessName: ['
+    proccfg   = ''
+    if flags.DATA_DIM==3:
+        proctypes += '"EmptyTensorFilter",'
+        procnames += '"EmptyTensorFilter",'
+        cfg = 'EmptyTensorFilter: { MinVoxel%dDCount: 10 Tensor%dDProducer: "%s" }\n'
+        cfg = cfg % (flags.DATA_DIM,flags.DATA_DIM,flags.DATA_KEYS[0])
+        proccfg   += cfg 
+        for i,key in enumerate(flags.DATA_KEYS):
+            proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
+            procnames += '"%s",' % key
+            if i == 1:
+                # special treatment for "label"
+                cfg = '        %s: { Tensor%dDProducer: "%s" EmptyVoxelValue: %d }\n'
+                cfg = cfg % (key,flags.DATA_DIM,key,flags.NUM_CLASS-1)
+                proccfg += cfg 
+            else:
+                cfg = '        %s: { Tensor%dDProducer: "%s" }\n'
+                cfg = cfg % (key,flags.DATA_DIM,key)
+                proccfg += cfg
+    else:
+        for i,key in enumerate(flags.DATA_KEYS):
+            proctypes += '"BatchFillerImage2D",'
+            procnames += '"%s",' % key
+            proccfg += ' %s: { ImageProducer: "%s" }\n' % (key,key)
     proctypes=proctypes[0:proctypes.rfind(',')] + ']'
     procnames=procnames[0:procnames.rfind(',')] + ']'
-
     random = 0
     if flags.SHUFFLE: random=2
 
@@ -40,12 +54,11 @@ MainIO: {
     NumThreads: 2
     NumBatchStorage: 2
     ProcessList: {
-       EmptyTensorFilter: { MinVoxel3DCount: 10 Tensor3DProducer: "%s" }
        %s
     }
 }
 '''
-    cfg = cfg % (random,input_filelist, proctypes, procnames, flags.DATA_KEYS[0], proccfg)
+    cfg = cfg % (random,input_filelist, proctypes, procnames, proccfg)
     cfg_file = tempfile.NamedTemporaryFile('w')
     cfg_file.write(cfg)
     cfg_file.flush()
@@ -175,7 +188,10 @@ class io_larcv_dense(io_base):
             data = self._ihandler.fetch_data(key)
             dim  = data.dim()
             data = data.data().reshape(dim)
-            blob[key] = np.array(np.swapaxes(np.swapaxes(np.swapaxes(data,4,3),3,2),2,1))
+            if self._flags.DATA_DIM == 3:
+                blob[key] = np.array(np.swapaxes(np.swapaxes(np.swapaxes(data,4,3),3,2),2,1))
+            else:
+                blob[key] = np.array(np.swapaxes(np.swapaxes(data,3,2),2,1))
             #blob[key] = []
             #for gpu in range(len(self._flags.GPUS)):
             #    blob[key].append(data[gpu*self.batch_per_gpu():(gpu+1)*self.batch_per_gpu()])
