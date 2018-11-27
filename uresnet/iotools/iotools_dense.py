@@ -125,12 +125,12 @@ class io_larcv_dense(io_base):
         self._next_counter = 0
         self._num_entries = self._ihandler._proc.pd().io().get_n_entries()
         self._num_channels = self._ihandler.fetch_data(self._flags.DATA_KEYS[0]).dim()[-1]
-        
+
         if self._flags.OUTPUT_FILE:
             self._output_cfg = make_output_larcv_cfg(self._flags)
             self._fout = larcv.IOManager(self._output_cfg.name)
             self._fout.initialize()
-        
+
     def stop_threads(self):
         self._ihandler.stop_manager()
 
@@ -167,7 +167,7 @@ class io_larcv_dense(io_base):
         nonzero = (data > 0).astype(np.float32).squeeze(0)
         score = np.max(softmax,axis=0) * nonzero
         prediction = np.argmax(softmax,axis=0).astype(np.float32) * nonzero
-        
+
         larcv_softmax = self._fout.get_data(datatype,'softmax')
         vs = to_voxelset(score)
         larcv_softmax.set(vs,meta)
@@ -182,7 +182,7 @@ class io_larcv_dense(io_base):
         import numpy as np
         if self._next_counter:
             self._ihandler.next(store_entries=True,store_event_ids=True)
-            
+
         blob = {}
         for key in self._flags.DATA_KEYS:
             data = self._ihandler.fetch_data(key)
@@ -201,3 +201,5 @@ class io_larcv_dense(io_base):
 
     def finalize(self):
         self._ihandler.reset()
+        if self._fout:
+            self._fout.finalize()
