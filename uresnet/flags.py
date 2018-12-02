@@ -37,7 +37,8 @@ class URESNET_FLAGS:
     IO_TYPE    = ''
     INPUT_FILE = ''
     OUTPUT_FILE = ''
-    BATCH_SIZE = 1
+    MINIBATCH_SIZE = -1
+    BATCH_SIZE = -1
     LOG_DIR    = ''
     MODEL_PATH = ''
     DATA_KEYS  = ''
@@ -63,7 +64,9 @@ class URESNET_FLAGS:
         parser.add_argument('-it','--iteration', type=int, default=self.ITERATION,
                             help='Iteration to run [default: %s]' % self.ITERATION)
         parser.add_argument('-bs','--batch_size', type=int, default=self.BATCH_SIZE,
-                            help='Batch Size during training for updating weights [default: %s]' % self.BATCH_SIZE)
+                            help='Batch size during training for updating weights [default: %s]' % self.BATCH_SIZE)
+        parser.add_argument('-mbs','--minibatch_size', type=int, default=self.MINIBATCH_SIZE,
+                            help='Mini-batch size (sample/gpu) during training for updating weights [default: %s]' % self.MINIBATCH_SIZE)
         parser.add_argument('-rs','--report_step', type=int, default=self.REPORT_STEP,
                             help='Period (in steps) to print out loss and accuracy [default: %s]' % self.REPORT_STEP)
         parser.add_argument('-mn','--model_name', type=str, default=self.MODEL_NAME,
@@ -150,8 +153,20 @@ class URESNET_FLAGS:
         if self.SEED < 0:
             import time
             self.SEED = int(time.time())
-
-
+        # Batch size checker
+        if self.BATCH_SIZE < 0 and self.MINIBATCH_SIZE < 0:
+            print('Cannot have both BATCH_SIZE (-bs) and MINIBATCH_SIZE (-mbs) negative values!')
+            raise ValueError
+        # Assign non-default values
+        if self.BATCH_SIZE < 0:
+            self.BATCH_SIZE = int(self.MINIBATCH_SIZE * len(self.GPUS))
+        if self.MINIBATCH_SIZE < 0:
+            self.MINIBATCH_SIZE = int(self.BATCH_SIZE / len(self.GPUS))
+        # Check consistency
+        if not (self.BATCH_SIZE % (self.MINIBATCH_SIZE * len(self.GPUS))) == 0:
+            print('BATCH_SIZE (-bs) must be multiples of MINIBATCH_SIZE (-mbs) and GPU count (--gpus)!')
+            raise ValueError
+            
 if __name__ == '__main__':
     flags = URESNET_FLAGS()
     flags.parse_args()

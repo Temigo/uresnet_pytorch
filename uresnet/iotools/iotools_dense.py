@@ -120,7 +120,7 @@ class io_larcv_dense(io_base):
                'filler_cfg'  : self._input_cfg.name}
         self._ihandler = larcv_threadio()
         self._ihandler.configure(cfg)
-        self._ihandler.start_manager(self.batch_size())
+        self._ihandler.start_manager(self.batch_per_step())
         self._ihandler.next(store_entries=True,store_event_ids=True)
         self._next_counter = 0
         self._num_entries = self._ihandler._proc.pd().io().get_n_entries()
@@ -138,7 +138,7 @@ class io_larcv_dense(io_base):
         self._ihandler.set_next_index(idx)
 
     def start_threads(self):
-        self._ihandler.start_manager(self.batch_size())
+        self._ihandler.start_manager(self.batch_per_step())
 
     def store_segment(self, idx_v, data_v, softmax_v):
         for i,idx in enumerate(idx_v):

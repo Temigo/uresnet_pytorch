@@ -42,7 +42,7 @@ class ResNetModule(nn.Module):
                 stride      = stride,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs)
+            batch_norm(num_features = num_outputs, momentum=0.9)
         )
 
         # residual path
@@ -54,7 +54,7 @@ class ResNetModule(nn.Module):
                 stride      = stride,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs)
+            batch_norm(num_features = num_outputs, momentum=0.9)
         )
 
         self.residual2 = torch.nn.Sequential(
@@ -65,7 +65,7 @@ class ResNetModule(nn.Module):
                 stride      = 1,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs)
+            batch_norm(num_features = num_outputs, momentum=0.9)
         )
 
     def forward(self, input_tensor):
@@ -129,7 +129,7 @@ class UResNet(nn.Module):
                 stride = 1,
                 padding = 0 # FIXME 'same' in tensorflow
             ),
-            batch_norm(num_features=self.base_num_outputs),
+            batch_norm(num_features=self.base_num_outputs,momentum=0.9),
             torch.nn.ReLU()
         )
         # Encoding steps
@@ -165,7 +165,7 @@ class UResNet(nn.Module):
                     padding=1,
                     output_padding=1
                 ),
-                batch_norm(num_features=int(current_num_outputs / 2)),
+                batch_norm(num_features=int(current_num_outputs / 2),momentum=0.9),
                 torch.nn.ReLU()
             ))
             current_num_outputs = int(current_num_outputs / 2)
@@ -178,7 +178,7 @@ class UResNet(nn.Module):
                 kernel_size = 3,
                 stride = 1
             ),
-            batch_norm(num_features=current_num_outputs),
+            batch_norm(num_features=current_num_outputs,momentum=0.9),
             torch.nn.ReLU()
         )
 
@@ -190,7 +190,7 @@ class UResNet(nn.Module):
                 kernel_size = 3,
                 stride = 1
             ),
-            batch_norm(num_features=self.num_classes)
+            batch_norm(num_features=self.num_classes, momentum=0.9)
         )
 
     def forward(self, input):

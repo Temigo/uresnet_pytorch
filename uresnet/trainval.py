@@ -36,12 +36,19 @@ class trainval(object):
     def train_step(self, data_blob,
                    display_intermediate=True, epoch=None):
         tstart = time.time()
-        res = self.forward(data_blob, display_intermediate, epoch)
+        res_combined = {}
+        for idx in range(len(data_blob['data'])):
+            blob = {}
+            for key in data_blob.keys(): blob[key] = data_blob[key][idx]
+            res = self.forward(blob, display_intermediate, epoch)
+            for key in res.keys():
+                if not key in res_combined: res_combined[key]=[res[key]]
+                else: res_combined[key].append(res[key])
         self.backward()
         # torch.cuda.empty_cache()
         self.tspent['train'] = time.time() - tstart
         self.tspent_sum['train'] += self.tspent['train']
-        return res
+        return res_combined
 
     def forward(self, data_blob, display_intermediate=True, epoch=None):
         """

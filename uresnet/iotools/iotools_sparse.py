@@ -11,13 +11,13 @@ def threadio_func(io_handle, thread_id):
     """
     Structure of returned blob:
         - voxels = [(N, 4)] * batch size
-        - feature = [(N, 1)] * batch_size
-        - data = [(N, 5)] * batch_size
+        - feature = [(N, 1)] * batch_per_step
+        - data = [(N, 5)] * batch_per_step
         - label = [(N, 1)] * batch size
     where N = total number of points across minibatch_size events
     """
     num_gpus = len(io_handle._flags.GPUS)
-    batch_size = io_handle.batch_size()
+    batch_per_step = io_handle.batch_per_step()
     batch_per_gpu = io_handle.batch_per_gpu()
     while 1:
         time.sleep(0.000001)
@@ -31,13 +31,13 @@ def threadio_func(io_handle, thread_id):
             for key, val in io_handle.blob().iteritems():
                 blob[key] = []
             if io_handle._flags.SHUFFLE:
-                idx_v = np.random.random([batch_size])*io_handle.num_entries()
+                idx_v = np.random.random([batch_per_step])*io_handle.num_entries()
                 idx_v = idx_v.astype(np.int32)
                 # for key, val in io_handle.blob().iteritems():
                 #     blob[key] = val  # fixme start, val?
             else:
                 start = io_handle._start_idx[thread_id]
-                end   = start + batch_size
+                end   = start + batch_per_step
                 if end < io_handle.num_entries():
                     idx_v = np.arange(start,end)
                     # for key, val in io_handle.blob().iteritems():
@@ -47,7 +47,7 @@ def threadio_func(io_handle, thread_id):
                     idx_v = np.concatenate([idx_v,np.arange(0,end-io_handle.num_entries())])
                     # for key, val in io_handle.blob().iteritems():
                     #     blob[key] = val[start:] + val[0:end-io_handle.num_entries()]
-                next_start = start + len(io_handle._threads) * batch_size
+                next_start = start + len(io_handle._threads) * batch_per_step
                 if next_start >= io_handle.num_entries():
                     next_start -= io_handle.num_entries()
                 io_handle._start_idx[thread_id] = next_start
@@ -136,7 +136,9 @@ class io_larcv_sparse(io_base):
         # br_data,br_label=(None,None)
         ach = ch_blob.values()[0]
         event_fraction = 1./ach.GetEntries() * 100.
+        total_sample = 0.
         total_point = 0.
+        total_data = 0.
         for i in range(ach.GetEntries()):
             if self._flags.LIMIT_NUM_SAMPLE > 0 and i == self._flags.LIMIT_NUM_SAMPLE:
                 break
@@ -145,7 +147,7 @@ class io_larcv_sparse(io_base):
                 if i == 0:
                     br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
             num_point = br_blob.values()[0].as_vector().size()
-            # if num_point < self._flags.KVALUE: continue
+            if num_point < 1: continue
 
             # ch_data.GetEntry(i)
             # if ch_label:  ch_label.GetEntry(i)
@@ -162,6 +164,7 @@ class io_larcv_sparse(io_base):
             br_data = br_blob[self._flags.DATA_KEYS[0]]
             np_data  = np.zeros(shape=(num_point,4),dtype=np.float32)
             larcv.fill_3d_pcloud(br_data, np_data)
+            total_data += np_data.size
             self._blob[self._flags.DATA_KEYS[0]].append(np_data)
 
             self._event_keys.append((br_data.run(),br_data.subrun(),br_data.event()))
@@ -175,10 +178,12 @@ class io_larcv_sparse(io_base):
 
             np_voxel   = np.zeros(shape=(num_point,self._flags.DATA_DIM),dtype=np.int32)
             as_numpy_voxels(br_data, np_voxel)
+            total_data += np_voxel.size
             self._blob['voxels'].append(np_voxel)
 
             np_feature = np.zeros(shape=(num_point,1),dtype=np.float32)
             as_numpy_pcloud(br_data,  np_feature)
+            total_data += np_feature.size
             self._blob['feature'].append(np_feature)
 
             # for the rest, different treatment
@@ -186,13 +191,16 @@ class io_larcv_sparse(io_base):
                 br = br_blob[key]
                 np_data = np.zeros(shape=(num_point,1),dtype=np.float32)
                 larcv.fill_3d_pcloud(br,np_data)
+                total_data += np_data.size
                 self._blob[key].append(np_data)
 
-            total_point += num_point * 4 * (4 + len(self._flags.DATA_KEYS)-1)
-            sys.stdout.write('Processed %d%% ... %d MB\r' % (int(event_fraction*i),int(total_point/1.e6)))
+            total_point  += num_point
+            total_sample += 1.
+            sys.stdout.write('Processed %d samples (%d%% ... %d MB\r' % (int(total_sample),int(event_fraction*i),int(total_data*4/1.e6)))
             sys.stdout.flush()
 
         sys.stdout.write('\n')
+        sys.stdout.write('Total: %d samples (%d points) ... %d MB\n' % (total_sample,total_point,total_data*4/1.e6))
         sys.stdout.flush()
         data = self._blob[self._flags.DATA_KEYS[0]]
         self._num_channels = data[0].shape[-1]
@@ -222,7 +230,7 @@ IOManager: {
     def set_index_start(self,idx):
         self.stop_threads()
         for i in range(len(self._threads)):
-            self._start_idx[i] = idx + i*self._batch_size
+            self._start_idx[i] = idx + i * self.batch_per_step()
 
     def start_threads(self):
         if self._threads[0] is not None:

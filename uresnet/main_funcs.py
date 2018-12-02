@@ -44,7 +44,7 @@ def train(flags):
     handlers = prepare(flags)
     train_loop(flags, handlers)
 
-
+    
 def inference(flags):
     flags.TRAIN = False
     handlers = prepare(flags)
@@ -99,19 +99,15 @@ def get_keys(flags):
         label_key = flags.DATA_KEYS[2]
     return data_key, label_key, weight_key
 
-
-def log(handlers, tstart_iteration, tsum, label, res,
-        flags, idx, epoch, tstamp_iteration):
+def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
+        
     report_step  = flags.REPORT_STEP and ((handlers.iteration+1) % flags.REPORT_STEP == 0)
 
-    pred_seg = res['segmentation']
-    loss_seg = res['loss_seg']
-    acc_seg  = res['accuracy']
+    loss_seg = np.mean(res['loss_seg'])
+    acc_seg  = np.mean(res['accuracy'])
 
     # Report (logger)
-    tspent_iteration = time.time() - tstart_iteration
     if handlers.csv_logger:
-        tsum += tspent_iteration
         handlers.csv_logger.record(('iter', 'epoch', 'titer', 'tsumiter'),
                                    (handlers.iteration,epoch,tspent_iteration,tsum))
         handlers.csv_logger.record(('tio', 'tsumio'),
@@ -159,14 +155,18 @@ def train_loop(flags, handlers):
 
         checkpt_step = flags.CHECKPOINT_STEP and flags.WEIGHT_PREFIX and ((handlers.iteration+1) % flags.CHECKPOINT_STEP == 0)
 
-        idx, blob = handlers.data_io.next()
+        idx_v = []
+        data_blob = {'data':[]}
+        if label_key  is not None: data_blob['label' ] = []
+        if weight_key is not None: data_blob['weight'] = []
+        
+        for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
 
-        data_blob = {}
-        data_blob['data'] = blob[data_key]
-        if label_key is not None:
-            data_blob['label'] = blob[label_key]
-        if weight_key is not None:
-            data_blob['weight'] = blob[weight_key]
+            idx, blob = handlers.data_io.next()
+            data_blob['data'].append(blob[data_key])
+            idx_v.append(idx)
+            if label_key  is not None: data_blob['label' ].append(blob[label_key ])
+            if weight_key is not None: data_blob['weight'].append(blob[weight_key])
 
         # Train step
         res = handlers.trainer.train_step(data_blob, epoch=float(epoch))
@@ -176,9 +176,9 @@ def train_loop(flags, handlers):
         if checkpt_step:
             handlers.trainer.save_state(handlers.iteration)
 
-        log(handlers, tstart_iteration, tsum,
-            data_blob['label'], res, flags,
-            idx, epoch, tstamp_iteration)
+        tspent_iteration = time.time() - tstart_iteration
+        tsum += tspent_iteration
+        log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)            
 
         # Increment iteration counter
         handlers.iteration += 1
@@ -214,8 +214,9 @@ def inference_loop(flags, handlers):
             handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
 
         epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
-        log(handlers, tstart_iteration, tsum, data_blob['label'], res,
-            flags, idx, epoch, tstamp_iteration)
+        tspent_iteration = time.time() - tstart_iteration
+        tsum += tspent_iteration
+        log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)
         handlers.iteration += 1
 
     # Finalize

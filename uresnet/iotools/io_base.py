@@ -8,12 +8,14 @@ class io_base(object):
 
     def __init__(self, flags):
 
-        if flags.BATCH_SIZE % len(flags.GPUS):
-            print('BATCH_SIZE (%d) must be divisible by GPU count (%d)' % (flags.BATCH_SIZE, len(flags.GPUS)))
+        if not flags.BATCH_SIZE % (flags.MINIBATCH_SIZE * len(flags.GPUS)) == 0:
+            msg = 'BATCH_SIZE (%d) must be divisible by GPU count (%d) times MINIBATCH_SIZE(%d)'
+            msg = msg % (flags.BATCH_SIZE, len(flags.GPUS), flags.MINIBATCH_SIZE)
+            print(msg)
             raise ValueError
         
-        self._batch_size    = flags.BATCH_SIZE
-        self._batch_per_gpu = flags.BATCH_SIZE / len(flags.GPUS)
+        self._minibatch_per_step = flags.MINIBATCH_SIZE * len(flags.GPUS)
+        self._minibatch_per_gpu  = flags.MINIBATCH_SIZE
         self._num_entries  = -1
         self._num_channels = -1
         self._flags = flags
@@ -24,11 +26,11 @@ class io_base(object):
     def blob(self):
         return self._blob
 
-    def batch_size(self):
-        return self._batch_size
+    def batch_per_step(self):
+        return self._minibatch_per_step
 
     def batch_per_gpu(self):
-        return self._batch_per_gpu
+        return self._minibatch_per_gpu
 
     def num_entries(self):
         return self._num_entries
