@@ -21,6 +21,7 @@ class URESNET_FLAGS:
     URESNET_NUM_STRIDES = 3
     URESNET_FILTERS = 16
     SPATIAL_SIZE = 192
+    BN_MOMENTUM = 0.9
 
     # flags for train/inference
     SEED           = -1
@@ -93,6 +94,8 @@ class URESNET_FLAGS:
                             help='Depth for UResNet [default: %s]' % self.URESNET_NUM_STRIDES)
         parser.add_argument('-uf','--uresnet-filters',type=int,default=self.URESNET_FILTERS,
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
+        parser.add_argument('-bnm','--bn-momentum',type=int,default=self.BN_MOMENTUM,
+                            help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
         return parser
 
     def _build_parsers(self):

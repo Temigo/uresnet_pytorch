@@ -70,7 +70,7 @@ class trainval(object):
             segmentation, = self._net(data)
             if not isinstance(segmentation, list):
                 segmentation = [segmentation]
-            
+
             # If label is given, compute the loss
             loss_seg, acc = 0., 0.
             if label is not None:
