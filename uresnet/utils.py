@@ -69,3 +69,50 @@ def print_memory(msg=''):
     max_cached = round_decimals(torch.cuda.max_memory_cached()/1.e9, 3)
     cached = round_decimals(torch.cuda.memory_cached()/1.e9, 3)
     print(max_allocated, allocated, max_cached, cached, msg)
+
+
+def compute_metrics(data_v, label_v, softmax_v):
+    assert len(data_v) == len(label_v)
+    assert len(data_v) == len(softmax_v)
+    res = {
+        'acc': [],
+        'correct_softmax': [],
+        'id': [],
+        'nonzero_pixels': [],
+        'class_acc': [],
+        'class_pixel': [],
+        'class_mean_softmax': [],
+    }
+    for i, label in enumerate(label_v):
+        data = data_v[i]
+        softmax = softmax_v[i]
+        # For each event
+        for batch_id in np.unique(data[:, 3]):
+            event_index = data[:, 3] == batch_id
+            event_softmax = softmax[event_index]
+            event_label = label[event_index]
+            # Non-zero Accuracy
+            predictions = np.argmax(event_softmax, axis=1)[:, None]
+            acc = (event_label == predictions).astype(np.int32).sum() / float(len(event_label))
+            res['acc'].append(acc)
+            # Softmax score of correct labels
+            correct_softmax = event_softmax[np.arange(len(event_label)), event_label.reshape((-1,)).astype(np.int32)][:, None]
+            res['correct_softmax'].append(np.mean(correct_softmax))
+            res['id'].append(batch_id)
+            res['nonzero_pixels'].append(event_label.shape[0])
+            classes, class_count = np.unique(event_label, return_counts=True)
+            class_pixel = []
+            class_acc = []
+            class_mean_softmax = []
+            for c in range(event_softmax.shape[1]):
+                class_index = event_label == c
+                class_acc.append((event_label[class_index] == predictions[class_index]).astype(np.int32).sum() / float(len(event_label[class_index])))
+                class_mean_softmax.append(np.mean(correct_softmax[class_index]))
+                if c in classes:
+                    class_pixel.append(class_count[classes == c])
+                else:
+                    class_pixel.append(0)
+            res['class_acc'].append(class_acc)
+            res['class_mean_softmax'].append(class_mean_softmax)
+            res['class_pixel'].append(np.hstack(class_pixel))
+    return res

@@ -16,6 +16,7 @@ class URESNET_FLAGS:
     MODEL_NAME = ""
     TRAIN      = True
     DEBUG      = False
+    FULL = False
 
     # Flags for Sparse UResNet model
     URESNET_NUM_STRIDES = 3
@@ -116,6 +117,8 @@ class URESNET_FLAGS:
 
         # inference parser
         inference_parser = subparsers.add_parser("inference",help="Run inference of Edge-GCNN")
+        inference_parser.add_argument('-full', '--full', default=self.FULL, action='store_true',
+                                      help='Full inference mode [default: %s]' % self.FULL)
         # IO test parser
         iotest_parser = subparsers.add_parser("iotest", help="Test iotools for Edge-GCNN")
 

@@ -282,7 +282,7 @@ IOManager: {
                 start = end
                 self.store_one_segment(idx,softmax)
             start = end
-    
+
     def store_one_segment(self, idx, softmax):
         from larcv import larcv
         if self._fout is None:

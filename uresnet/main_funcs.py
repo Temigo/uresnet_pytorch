@@ -4,6 +4,7 @@ from __future__ import print_function
 import os
 import time
 import datetime
+import glob
 import sys
 import numpy as np
 from uresnet.iotools import io_factory
@@ -44,11 +45,14 @@ def train(flags):
     handlers = prepare(flags)
     train_loop(flags, handlers)
 
-    
+
 def inference(flags):
     flags.TRAIN = False
     handlers = prepare(flags)
-    inference_loop(flags, handlers)
+    if flags.FULL:
+        full_inference_loop(flags, handlers)
+    else:
+        inference_loop(flags, handlers)
 
 
 def prepare(flags):
@@ -71,8 +75,10 @@ def prepare(flags):
 
     # Restore weights if necessary
     handlers.iteration = 0
-    loaded_iteration   = handlers.trainer.initialize()
-    if flags.TRAIN: handlers.iteration = loaded_iteration
+    loaded_iteration = 0
+    if not flags.FULL:
+        loaded_iteration   = handlers.trainer.initialize()
+        if flags.TRAIN: handlers.iteration = loaded_iteration
 
     # Weight save directory
     if flags.WEIGHT_PREFIX:
@@ -86,7 +92,8 @@ def prepare(flags):
         if not flags.TRAIN:
             logname = '%s/inference_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration)
         handlers.csv_logger = utils.CSVData(logname)
-
+        if not flags.TRAIN and flags.FULL:
+            handlers.metrics_logger = utils.CSVData('%s/metrics_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
     return handlers
 
 
@@ -100,7 +107,7 @@ def get_keys(flags):
     return data_key, label_key, weight_key
 
 def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
-        
+
     report_step  = flags.REPORT_STEP and ((handlers.iteration+1) % flags.REPORT_STEP == 0)
 
     loss_seg = np.mean(res['loss_seg'])
@@ -159,7 +166,7 @@ def train_loop(flags, handlers):
         data_blob = {'data':[]}
         if label_key  is not None: data_blob['label' ] = []
         if weight_key is not None: data_blob['weight'] = []
-        
+
         for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
 
             idx, blob = handlers.data_io.next()
@@ -170,7 +177,6 @@ def train_loop(flags, handlers):
 
         # Train step
         res = handlers.trainer.train_step(data_blob, epoch=float(epoch))
-
         # Save snapshot
         tspent_save = 0.
         if checkpt_step:
@@ -178,7 +184,7 @@ def train_loop(flags, handlers):
 
         tspent_iteration = time.time() - tstart_iteration
         tsum += tspent_iteration
-        log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)            
+        log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)
 
         # Increment iteration counter
         handlers.iteration += 1
@@ -222,4 +228,104 @@ def inference_loop(flags, handlers):
     # Finalize
     if handlers.csv_logger:
         handlers.csv_logger.close()
+    handlers.data_io.finalize()
+
+
+def full_inference_loop(flags, handlers):
+    data_key, label_key, weight_key = get_keys(flags)
+    tsum = 0.
+    # Metrics for each event
+    global_metrics = {
+        'iteration': [],
+        'acc': [],
+        'correct_softmax': [],
+        'id': [],
+        'nonzero_pixels': [],
+        'class_acc': [],
+        'class_pixel': [],
+        'class_mean_softmax': []
+    }
+    weights = glob.glob(flags.MODEL_PATH)
+    print(weights)
+    idx_v, blob_v = [], []
+    for i in range(flags.ITERATION):
+        idx, blob = handlers.data_io.next()
+        idx_v.append(idx)
+        blob_v.append(blob)
+
+    for weight in weights:
+        handlers.trainer._flags.MODEL_PATH = weight
+        loaded_iteration   = handlers.trainer.initialize()
+        handlers.iteration = 0
+        while handlers.iteration < flags.ITERATION:
+            tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+            tstart_iteration = time.time()
+
+            # idx, blob = handlers.data_io.next()
+            idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
+
+            data_blob = {}
+            data_blob['data'] = blob[data_key]
+            if label_key is not None:
+                data_blob['label'] = blob[label_key]
+            if weight_key is not None:
+                data_blob['weight'] = blob[weight_key]
+
+            # Run inference
+            res = handlers.trainer.forward(data_blob)
+
+            # Store output if requested
+            if flags.OUTPUT_FILE:
+                handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
+
+            epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
+            tspent_iteration = time.time() - tstart_iteration
+            tsum += tspent_iteration
+            log(handlers, tstamp_iteration, tspent_iteration, tsum, res,
+                flags, epoch)
+            # Log metrics
+            if label_key is not None:
+                metrics = utils.compute_metrics(blob[data_key], blob[label_key], res['softmax'])
+                metrics['id'] = idx
+                metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
+                for key in global_metrics:
+                    global_metrics[key].extend(metrics[key])
+                #ninety_quantile = utils.quantiles(blob[label_key], res['softmax'])
+            handlers.iteration += 1
+
+    # Metrics
+    global_metrics['id'] = np.hstack(global_metrics['id'])
+    global_metrics['iteration'] = np.hstack(global_metrics['iteration'])
+    # global_metrics['iteration'] = np.repeat(global_metrics['iteration'][:, None], global_metrics['id'].shape[1])
+    for key in global_metrics:
+        global_metrics[key] = np.array(global_metrics[key])
+
+    res = {}
+    # 90% quantile
+    res['90q'] = np.percentile(global_metrics['acc'], 90)
+    # 80% quantile
+    res['80q'] = np.percentile(global_metrics['acc'], 80)
+    # Mean accuracy
+    res['mean_acc'] = np.mean(global_metrics['acc'])
+    # Median accuracy
+    res['50q'] = np.median(global_metrics['acc'])
+    # Mean accuracy of the worst 5%
+    worst5_index = global_metrics['acc'] <= np.percentile(global_metrics['acc'], 5)
+    res['worst5'] = np.mean(global_metrics['acc'][worst5_index])
+    # Mean softmax score for the correct prediction
+    for key in global_metrics:
+        res[key] = global_metrics[key]
+    print(res)
+    for i, idx in enumerate(res['id']):
+        handlers.metrics_logger.record(('iteration', 'id', 'correct_softmax', 'acc', 'nonzero_pixels'),
+                (res['iteration'][i], idx, res['correct_softmax'][i], res['acc'][i], res['nonzero_pixels'][i]))
+        handlers.metrics_logger.record(['class_%d_acc' % c for c in range(flags.NUM_CLASS)], [res['class_acc'][i][c] for c in range(flags.NUM_CLASS)])
+        handlers.metrics_logger.record(['class_%d_pixel' % c for c in range(flags.NUM_CLASS)], [res['class_acc'][i][c] for c in range(flags.NUM_CLASS)])
+        handlers.metrics_logger.record(['class_%d_mean_softmax' % c for c in range(flags.NUM_CLASS)], [res['class_mean_softmax'][i][c] for c in range(flags.NUM_CLASS)])
+        handlers.metrics_logger.write()
+    # Finalize
+    if handlers.csv_logger:
+        handlers.csv_logger.close()
+    if handlers.metrics_logger:
+        handlers.metrics_logger.close()
     handlers.data_io.finalize()
