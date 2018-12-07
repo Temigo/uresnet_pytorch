@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 import numpy as np
 import torch
+from sklearn.cluster import DBSCAN
 
 
 class CSVData:
@@ -82,13 +83,20 @@ def compute_metrics(data_v, label_v, softmax_v):
         'class_acc': [],
         'class_pixel': [],
         'class_mean_softmax': [],
+        'cluster_acc': [],
     }
+    dbscan_vv = []
     for i, label in enumerate(label_v):
         data = data_v[i]
         softmax = softmax_v[i]
         # For each event
         for batch_id in np.unique(data[:, 3]):
             event_index = data[:, 3] == batch_id
+
+            event_data = data[event_index]
+            db = DBSCAN(eps=50, min_samples=15).fit(event_data[:, :3]).labels_
+            dbscan_vv.append(db[:, None])
+
             event_softmax = softmax[event_index]
             event_label = label[event_index]
             # Non-zero Accuracy
@@ -115,4 +123,8 @@ def compute_metrics(data_v, label_v, softmax_v):
             res['class_acc'].append(class_acc)
             res['class_mean_softmax'].append(class_mean_softmax)
             res['class_pixel'].append(np.hstack(class_pixel))
-    return res
+            clusters_index = db > -1
+            print(np.unique(db))
+            cluster_acc = (event_label[clusters_index] == predictions[clusters_index]).astype(np.int32).sum() / clusters_index.astype(np.int32).sum()
+            res['cluster_acc'].append(cluster_acc)
+    return res, dbscan_vv

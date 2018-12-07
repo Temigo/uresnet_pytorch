@@ -243,7 +243,8 @@ def full_inference_loop(flags, handlers):
         'nonzero_pixels': [],
         'class_acc': [],
         'class_pixel': [],
-        'class_mean_softmax': []
+        'class_mean_softmax': [],
+        'cluster_acc': []
     }
     weights = glob.glob(flags.MODEL_PATH)
     print(weights)
@@ -275,8 +276,8 @@ def full_inference_loop(flags, handlers):
             res = handlers.trainer.forward(data_blob)
 
             # Store output if requested
-            if flags.OUTPUT_FILE:
-                handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
+            # if flags.OUTPUT_FILE:
+            #     handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
 
             epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
             tspent_iteration = time.time() - tstart_iteration
@@ -285,16 +286,27 @@ def full_inference_loop(flags, handlers):
                 flags, epoch)
             # Log metrics
             if label_key is not None:
-                metrics = utils.compute_metrics(blob[data_key], blob[label_key], res['softmax'])
+                metrics, dbscans = utils.compute_metrics(blob[data_key], blob[label_key], res['softmax'])
                 metrics['id'] = idx
                 metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
                 for key in global_metrics:
                     global_metrics[key].extend(metrics[key])
                 #ninety_quantile = utils.quantiles(blob[label_key], res['softmax'])
+
+            # Store output if requested
+            # Study low acc Michels
+            # class_acc = np.array(metrics['class_acc'])
+            # low_michel = class_acc[:, -1].mean() <= 0.5
+            if flags.OUTPUT_FILE: #and low_michel:
+                if label_key is None:
+                    handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
+                else:
+                    handlers.data_io.store_segment(idx, blob[data_key], res['softmax'], clusters=dbscans)
             handlers.iteration += 1
 
     # Metrics
-    global_metrics['id'] = np.hstack(global_metrics['id'])
+    if len(global_metrics['id']):
+        global_metrics['id'] = np.hstack(global_metrics['id'])
     global_metrics['iteration'] = np.hstack(global_metrics['iteration'])
     # global_metrics['iteration'] = np.repeat(global_metrics['iteration'][:, None], global_metrics['id'].shape[1])
     for key in global_metrics:
@@ -317,10 +329,10 @@ def full_inference_loop(flags, handlers):
         res[key] = global_metrics[key]
     print(res)
     for i, idx in enumerate(res['id']):
-        handlers.metrics_logger.record(('iteration', 'id', 'correct_softmax', 'acc', 'nonzero_pixels'),
-                (res['iteration'][i], idx, res['correct_softmax'][i], res['acc'][i], res['nonzero_pixels'][i]))
+        handlers.metrics_logger.record(('iteration', 'id', 'correct_softmax', 'acc', 'nonzero_pixels', 'cluster_acc'),
+                (res['iteration'][i], idx, res['correct_softmax'][i], res['acc'][i], res['nonzero_pixels'][i], res['cluster_acc'][i]))
         handlers.metrics_logger.record(['class_%d_acc' % c for c in range(flags.NUM_CLASS)], [res['class_acc'][i][c] for c in range(flags.NUM_CLASS)])
-        handlers.metrics_logger.record(['class_%d_pixel' % c for c in range(flags.NUM_CLASS)], [res['class_acc'][i][c] for c in range(flags.NUM_CLASS)])
+        handlers.metrics_logger.record(['class_%d_pixel' % c for c in range(flags.NUM_CLASS)], [res['class_pixel'][i][c] for c in range(flags.NUM_CLASS)])
         handlers.metrics_logger.record(['class_%d_mean_softmax' % c for c in range(flags.NUM_CLASS)], [res['class_mean_softmax'][i][c] for c in range(flags.NUM_CLASS)])
         handlers.metrics_logger.write()
     # Finalize

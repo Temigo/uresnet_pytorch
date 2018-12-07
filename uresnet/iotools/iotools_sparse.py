@@ -271,19 +271,21 @@ IOManager: {
 
         return res
 
-    def store_segment(self,idx_vv,data_vv,softmax_vv):
+    def store_segment(self,idx_vv,data_vv,softmax_vv, **kwargs):
         for batch,idx_v in enumerate(idx_vv):
             start,end = (0,0)
             softmax_v = softmax_vv[batch]
+            args_v = [kwargs[keyword][batch] for keyword in kwargs]
             for i,idx in enumerate(idx_v):
                 voxels = self.blob()['voxels'][idx]
                 end    = start + len(voxels)
                 softmax = softmax_v[start:end,:]
+                args_event = [arg_v[start:end, :] for arg_v in args_v]
                 start = end
-                self.store_one_segment(idx,softmax)
+                self.store_one_segment(idx,softmax, **dict(zip(kwargs.keys(), args_event)))
             start = end
 
-    def store_one_segment(self, idx, softmax):
+    def store_one_segment(self, idx, softmax, **kwargs):
         from larcv import larcv
         if self._fout is None:
             return
@@ -311,6 +313,12 @@ IOManager: {
         larcv_prediction = self._fout.get_data('sparse3d','prediction')
         vs = larcv.as_tensor3d(voxel,prediction,meta,-1.)
         larcv_prediction.set(vs,meta)
+
+        for keyword in kwargs:
+            values = kwargs[keyword].reshape([-1]).astype(np.float32)
+            larcv_arg = self._fout.get_data('sparse3d', keyword)
+            vs = larcv.as_tensor3d(voxel, values, meta, -1.)
+            larcv_arg.set(vs, meta)
 
         if len(self._flags.DATA_KEYS) > 1:
             label = self.blob()[self._flags.DATA_KEYS[1]][idx]
