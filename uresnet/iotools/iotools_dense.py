@@ -5,6 +5,7 @@ import tempfile
 import numpy as np
 from uresnet.iotools.io_base import io_base
 
+
 def make_input_larcv_cfg(flags):
     input_filelist = 'InputFiles: ['
     for i,f in enumerate(flags.INPUT_FILE):
@@ -20,7 +21,7 @@ def make_input_larcv_cfg(flags):
         procnames += '"EmptyTensorFilter",'
         cfg = 'EmptyTensorFilter: { MinVoxel%dDCount: 10 Tensor%dDProducer: "%s" }\n'
         cfg = cfg % (flags.DATA_DIM,flags.DATA_DIM,flags.DATA_KEYS[0])
-        proccfg   += cfg 
+        proccfg   += cfg
         for i,key in enumerate(flags.DATA_KEYS):
             proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
             procnames += '"%s",' % key
@@ -28,7 +29,7 @@ def make_input_larcv_cfg(flags):
                 # special treatment for "label"
                 cfg = '        %s: { Tensor%dDProducer: "%s" EmptyVoxelValue: %d }\n'
                 cfg = cfg % (key,flags.DATA_DIM,key,flags.NUM_CLASS-1)
-                proccfg += cfg 
+                proccfg += cfg
             else:
                 cfg = '        %s: { Tensor%dDProducer: "%s" }\n'
                 cfg = cfg % (key,flags.DATA_DIM,key)
@@ -63,6 +64,7 @@ MainIO: {
     cfg_file.write(cfg)
     cfg_file.flush()
     return cfg_file
+
 
 def make_output_larcv_cfg(flags):
     # Output

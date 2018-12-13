@@ -7,21 +7,25 @@ import os
 import sys
 from uresnet.ops import GraphDataParallel
 import uresnet.models as models
-import uresnet.utils as utils
+import numpy as np
+
 
 class trainval(object):
     def __init__(self, flags):
-        self._flags  = flags
+        self._flags = flags
         self.tspent = {}
         self.tspent_sum = {}
 
     def backward(self):
-        self._optimizer.zero_grad()
-        self._loss.backward()
+        total_loss = 0.0
+        for loss in self._loss:
+            total_loss += loss
+        total_loss /= len(self._loss)
+        self._loss = []  # Reset loss accumulator
+
+        self._optimizer.zero_grad()  # Reset gradients accumulation
+        total_loss.backward()
         self._optimizer.step()
-        # self._loss = None
-        # del self._loss
-        # torch.cuda.empty_cache()
 
     def save_state(self, iteration):
         tstart = time.time()
@@ -36,40 +40,58 @@ class trainval(object):
     def train_step(self, data_blob,
                    display_intermediate=True, epoch=None):
         tstart = time.time()
-        res_combined = {}
-        for idx in range(len(data_blob['data'])):
-            blob = {}
-            for key in data_blob.keys(): blob[key] = data_blob[key][idx]
-            res = self.forward(blob, display_intermediate, epoch)
-            for key in res.keys():
-                if not key in res_combined: res_combined[key]=[res[key]]
-                else: res_combined[key].append(res[key])
+        self._loss = []  # Initialize loss accumulator
+        res_combined = self.forward(data_blob, display_intermediate, epoch)
+        # Run backward once for all the previous forward
         self.backward()
-        # torch.cuda.empty_cache()
         self.tspent['train'] = time.time() - tstart
         self.tspent_sum['train'] += self.tspent['train']
         return res_combined
 
     def forward(self, data_blob, display_intermediate=True, epoch=None):
         """
-        data/label/weight are lists of size batch size.
+        Run forward for
+        flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)) times
+        """
+        res_combined = {}
+        for idx in range(len(data_blob['data'])):
+            blob = {}
+            for key in data_blob.keys():
+                blob[key] = data_blob[key][idx]
+            res = self._forward(blob, display_intermediate, epoch)
+            for key in res.keys():
+                if key not in res_combined:
+                    res_combined[key] = res[key]
+                else:
+                    res_combined[key].extend(res[key])
+        # Average loss and acc over all the events in this batch
+        batch_size = len(res_combined['segmentation'])
+        res_combined['accuracy'] = np.array(res_combined['accuracy']).sum() / batch_size
+        res_combined['loss_seg'] = np.array(res_combined['loss_seg']).sum() / batch_size
+        return res_combined
+
+    def _forward(self, data_blob, display_intermediate=True, epoch=None):
+        """
+        data/label/weight are lists of size minibatch size.
         For sparse uresnet:
         data[0]: shape=(N, 5)
         where N = total nb points in all events of the minibatch
         For dense uresnet:
-        data[0]: shape=(minibatch size, spatial size, spatial size, spatial size, channel)
+        data[0]: shape=(minibatch size, channel, spatial size, spatial size, spatial size)
         """
         data = data_blob['data']
         label = data_blob.get('label', None)
         weight = data_blob.get('weight', None)
 
-        tstart = time.time()
         with torch.set_grad_enabled(self._flags.TRAIN):
             # Segmentation
             data = [torch.as_tensor(d).cuda() for d in data]
-            segmentation, = self._net(data)
-            if not isinstance(segmentation, list):
-                segmentation = [segmentation]
+            print(data[0].size(), len(data))
+            tstart = time.time()
+            segmentation = self._net(data)
+            print('segmentation size', segmentation.size())
+            # if not isinstance(segmentation, list):
+            #     segmentation = [segmentation]
 
             # If label is given, compute the loss
             loss_seg, acc = 0., 0.
@@ -84,12 +106,12 @@ class trainval(object):
                         w.requires_grad = False
                 loss_seg, acc = self._criterion(segmentation, data, label, weight)
                 if self._flags.TRAIN:
-                    self._loss = loss_seg
+                    self._loss.append(loss_seg)
             res = {
                 'segmentation': [s.cpu().detach().numpy() for s in segmentation],
                 'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation],
-                'accuracy': acc,
-                'loss_seg': loss_seg.cpu().item() if not isinstance(loss_seg, float) else loss_seg
+                'accuracy': [acc],
+                'loss_seg': [loss_seg.cpu().item() if not isinstance(loss_seg, float) else loss_seg]
             }
             self.tspent['forward'] = time.time() - tstart
             self.tspent_sum['forward'] += self.tspent['forward']
@@ -118,9 +140,8 @@ class trainval(object):
             self._net.eval().cuda()
 
         self._optimizer = torch.optim.Adam(self._net.parameters(), lr=self._flags.LEARNING_RATE)
-        self._softmax = torch.nn.LogSoftmax(dim=1)
-
-        #self._criterion = SegmentationLoss(self._flags).cuda()
+        # self._softmax = torch.nn.LogSoftmax(dim=1)
+        self._softmax = torch.nn.Softmax(dim=1)
 
         iteration = 0
         if self._flags.MODEL_PATH:

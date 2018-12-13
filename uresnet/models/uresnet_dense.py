@@ -42,7 +42,7 @@ class ResNetModule(nn.Module):
                 stride      = stride,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs, momentum=0.9)
+            batch_norm(num_features = num_outputs, momentum=bn_momentum)
         )
 
         # residual path
@@ -199,6 +199,11 @@ class UResNet(nn.Module):
         )
 
     def forward(self, input):
+        """
+        Can be 2D or 3D. Supports batch processing.
+        input size: B, C, N, N, (N,)
+        """
+        print('uresnet', input.size())
         conv_feature_map = {}
         #net = input.view(-1,self.num_inputs,self.image_size,self.image_size,self.image_size)
         net = F.pad(input, padding(self.conv1[0].kernel_size[0], self.conv1[0].stride[0], input.size()), mode='replicate')
@@ -219,12 +224,11 @@ class UResNet(nn.Module):
         net = self.conv2(net)
         net = F.pad(net, padding(self.conv3[0].kernel_size[0], self.conv3[0].stride[0], net.size()), mode='replicate')
         net = self.conv3(net)
+        print(net.size())
         return net
 
-class SegmentationLoss(torch.nn.modules.loss._Loss):
 
-    #def __init__(self, flags, size_average=False):
-    #    super(SegmentationLoss, self).__init__(size_average)
+class SegmentationLoss(torch.nn.modules.loss._Loss):
     def __init__(self, flags, reduction='sum'):
         super(SegmentationLoss, self).__init__(reduction=reduction)
         self._flags = flags
@@ -233,19 +237,19 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
     def forward(self, segmentation, data, label, weight):
         total_loss = 0.
         total_acc = 0.
+        assert len(segmentation) == len(data)
+        assert len(data) == len(label)
+        if weight is not None:
+            assert len(weight) == len(label)
 
-        for i in range(len(self._flags.GPUS)):
-            event_data = data[i]
+        for i in range(len(data)):
             nonzero_idx = data[i] > 0.000001
             event_segmentation = segmentation[i].unsqueeze(0)
             event_label = label[i].squeeze(0).unsqueeze(0).long()
-            loss = self.cross_entropy(event_segmentation,event_label)
+            loss = self.cross_entropy(event_segmentation, event_label)
             if weight is not None:
                 loss *= weight[i]
-            #print(event_segmentation.sum().item())
-            #print(event_label.sum().item())
-            #print(loss.sum().item())
-            prediction = torch.argmax(event_segmentation,dim=1).squeeze(1)
+            prediction = torch.argmax(event_segmentation, dim=1).squeeze(1)
             acc = (prediction == event_label)[nonzero_idx].sum().item() / float(nonzero_idx.long().sum().item())
 
             loss *= nonzero_idx.float()
@@ -254,7 +258,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
             total_loss += loss
             total_acc += acc
 
-        total_loss = total_loss / float(len(self._flags.GPUS))
-        total_acc = total_acc / float(len(self._flags.GPUS))
+        total_loss = total_loss
+        total_acc = total_acc
 
         return total_loss, total_acc

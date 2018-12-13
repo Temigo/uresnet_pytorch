@@ -66,7 +66,7 @@ def prepare(flags):
         handlers.data_io.start_threads()
         handlers.data_io.next()
     if 'sparse' in flags.MODEL_NAME and 'sparse' not in flags.IO_TYPE:
-        sys.stderr.write('UResNet needs sparse IO.')
+        sys.stderr.write('Sparse UResNet needs sparse IO.')
         sys.exit(1)
 
     # Trainer configuration
@@ -113,12 +113,15 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     loss_seg = np.mean(res['loss_seg'])
     acc_seg  = np.mean(res['accuracy'])
 
+    mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
+
     # Report (logger)
     if handlers.csv_logger:
         handlers.csv_logger.record(('iter', 'epoch', 'titer', 'tsumiter'),
                                    (handlers.iteration,epoch,tspent_iteration,tsum))
         handlers.csv_logger.record(('tio', 'tsumio'),
                                    (handlers.data_io.tspent_io,handlers.data_io.tspent_sum_io))
+        handlers.csv_logger.record(('mem', ), (mem, ))
         tmap, tsum_map = handlers.trainer.tspent, handlers.trainer.tspent_sum
         if flags.TRAIN:
             handlers.csv_logger.record(('ttrain','tsave','tsumtrain','tsumsave'),
@@ -137,7 +140,7 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         tfrac = utils.round_decimals(tmap['train']/tspent_iteration*100., 2)
         tabs  = utils.round_decimals(tmap['train'], 3)
         epoch = utils.round_decimals(epoch, 2)
-        mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
+
         if flags.TRAIN:
             msg = 'Iter. %d (epoch %g) @ %s ... train time %g%% (%g [s]) mem. %g GB \n'
             msg = msg % (handlers.iteration, epoch, tstamp_iteration, tfrac, tabs, mem)
@@ -149,6 +152,26 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         sys.stdout.flush()
         if handlers.csv_logger: handlers.csv_logger.flush()
         if handlers.train_logger: handlers.train_logger.flush()
+
+
+def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
+    """
+    Handles minibatching the data
+    """
+    idx_v = []
+    data_blob = {'data':[]}
+    if label_key  is not None: data_blob['label' ] = []
+    if weight_key is not None: data_blob['weight'] = []
+
+    for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
+        idx, blob = handlers.data_io.next()
+        data_blob['data'].append(blob[data_key])
+        idx_v.append(idx)
+        if label_key  is not None: data_blob['label' ].append(blob[label_key ])
+        if weight_key is not None: data_blob['weight'].append(blob[weight_key])
+
+    return idx_v, data_blob
+
 
 def train_loop(flags, handlers):
     data_key, label_key, weight_key = get_keys(flags)
@@ -162,23 +185,11 @@ def train_loop(flags, handlers):
 
         checkpt_step = flags.CHECKPOINT_STEP and flags.WEIGHT_PREFIX and ((handlers.iteration+1) % flags.CHECKPOINT_STEP == 0)
 
-        idx_v = []
-        data_blob = {'data':[]}
-        if label_key  is not None: data_blob['label' ] = []
-        if weight_key is not None: data_blob['weight'] = []
-
-        for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
-
-            idx, blob = handlers.data_io.next()
-            data_blob['data'].append(blob[data_key])
-            idx_v.append(idx)
-            if label_key  is not None: data_blob['label' ].append(blob[label_key ])
-            if weight_key is not None: data_blob['weight'].append(blob[weight_key])
+        idx_v, data_blob = get_data_minibatched(handlers, flags, data_key, label_key, weight_key)
 
         # Train step
         res = handlers.trainer.train_step(data_blob, epoch=float(epoch))
         # Save snapshot
-        tspent_save = 0.
         if checkpt_step:
             handlers.trainer.save_state(handlers.iteration)
 
@@ -198,6 +209,8 @@ def train_loop(flags, handlers):
 def inference_loop(flags, handlers):
     data_key, label_key, weight_key = get_keys(flags)
     tsum = 0.
+    handlers.data_io.next()
+    handlers.data_io.next()
     while handlers.iteration < flags.ITERATION:
         tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
         tstart_iteration = time.time()
@@ -205,19 +218,17 @@ def inference_loop(flags, handlers):
         idx, blob = handlers.data_io.next()
 
         data_blob = {}
-        data_blob['data'] = blob[data_key]
+        data_blob['data'] = [blob[data_key]]
         if label_key is not None:
-            data_blob['label'] = blob[label_key]
+            data_blob['label'] = [blob[label_key]]
         if weight_key is not None:
-            data_blob['weight'] = blob[weight_key]
+            data_blob['weight'] = [blob[weight_key]]
 
         # Run inference
         res = handlers.trainer.forward(data_blob)
-
-        segmentations = res.get('segmentation', None)
         # Store output if requested
         if flags.OUTPUT_FILE:
-            handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
+            handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
 
         epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         tspent_iteration = time.time() - tstart_iteration
@@ -244,7 +255,8 @@ def full_inference_loop(flags, handlers):
         'class_acc': [],
         'class_pixel': [],
         'class_mean_softmax': [],
-        'cluster_acc': []
+        'cluster_acc': [],
+        'class_cluster_acc': []
     }
     weights = glob.glob(flags.MODEL_PATH)
     print(weights)
@@ -286,7 +298,10 @@ def full_inference_loop(flags, handlers):
                 flags, epoch)
             # Log metrics
             if label_key is not None:
-                metrics, dbscans = utils.compute_metrics(blob[data_key], blob[label_key], res['softmax'])
+                if flags.MODEL_NAME == 'uresnet_sparse':
+                    metrics, dbscans = utils.compute_metrics_sparse(blob[data_key], blob[label_key], res['softmax'])
+                else:
+                    metrics = utils.compute_metrics_dense(blob[data_key], blob[label_key], res['softmax'])
                 metrics['id'] = idx
                 metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
                 for key in global_metrics:
@@ -296,12 +311,14 @@ def full_inference_loop(flags, handlers):
             # Store output if requested
             # Study low acc Michels
             # class_acc = np.array(metrics['class_acc'])
-            # low_michel = class_acc[:, -1].mean() <= 0.5
-            if flags.OUTPUT_FILE: #and low_michel:
-                if label_key is None:
-                    handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
-                else:
-                    handlers.data_io.store_segment(idx, blob[data_key], res['softmax'], clusters=dbscans)
+            # low_michel = class_acc[:, -1].mean() <= 0.6
+            # michel_pixel = np.array(metrics['class_pixel'])[:, -1]
+            # if flags.OUTPUT_FILE and low_michel and michel_pixel[0] > 200:
+            #     print(idx, class_acc,np.array( metrics['class_cluster_acc'])[:, -1], michel_pixel)
+            #     if label_key is None:
+            #         handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
+            #     else:
+            #         handlers.data_io.store_segment(idx, blob[data_key], res['softmax'], clusters=dbscans)
             handlers.iteration += 1
 
     # Metrics
@@ -332,6 +349,7 @@ def full_inference_loop(flags, handlers):
         handlers.metrics_logger.record(('iteration', 'id', 'correct_softmax', 'acc', 'nonzero_pixels', 'cluster_acc'),
                 (res['iteration'][i], idx, res['correct_softmax'][i], res['acc'][i], res['nonzero_pixels'][i], res['cluster_acc'][i]))
         handlers.metrics_logger.record(['class_%d_acc' % c for c in range(flags.NUM_CLASS)], [res['class_acc'][i][c] for c in range(flags.NUM_CLASS)])
+        handlers.metrics_logger.record(['class_%d_cluster_acc' % c for c in range(flags.NUM_CLASS)], [res['class_cluster_acc'][i][c] for c in range(flags.NUM_CLASS)])
         handlers.metrics_logger.record(['class_%d_pixel' % c for c in range(flags.NUM_CLASS)], [res['class_pixel'][i][c] for c in range(flags.NUM_CLASS)])
         handlers.metrics_logger.record(['class_%d_mean_softmax' % c for c in range(flags.NUM_CLASS)], [res['class_mean_softmax'][i][c] for c in range(flags.NUM_CLASS)])
         handlers.metrics_logger.write()

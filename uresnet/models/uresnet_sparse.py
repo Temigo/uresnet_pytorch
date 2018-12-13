@@ -4,6 +4,8 @@ from __future__ import print_function
 import torch
 import sparseconvnet as scn
 import time
+
+
 class UResNet(torch.nn.Module):
     def __init__(self, flags):
         super(UResNet, self).__init__()
@@ -35,12 +37,10 @@ class UResNet(torch.nn.Module):
         #return [self.linear(self.sparseModel((coords,features)))]
         x = self.sparseModel((coords, features))
         x = self.linear(x)
-        return [x]
+        return x
+
 
 class SegmentationLoss(torch.nn.modules.loss._Loss):
-
-    #def __init__(self, flags, size_average=False):
-    #    super(SegmentationLoss, self).__init__(size_average)
     def __init__(self, flags, reduction='sum'):
         super(SegmentationLoss, self).__init__(reduction=reduction)
         self._flags = flags
@@ -58,7 +58,9 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         total_loss = 0
         total_acc = 0
         total_count = 0
+        print(segmentation.size())
         for i in range(len(self._flags.GPUS)):
+            segmentation_i = segmentation[]
             total_loss += torch.mean(self.cross_entropy(segmentation[i],torch.squeeze(label[i],dim=-1).long()))
             prediction = torch.argmax(segmentation[i],dim=-1)
             total_acc += (prediction == torch.squeeze(label[i],dim=-1).long()).sum().item() / float(prediction.nelement())
@@ -88,4 +90,3 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         total_acc = total_acc / total_count
 
         return total_loss, total_acc
-
