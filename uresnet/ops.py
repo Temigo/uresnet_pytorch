@@ -19,7 +19,12 @@ class GraphDataParallel(torch.nn.parallel.DataParallel):
 
         minibatch_size = int(len(inputs[0]) / len(device_ids))
         for i, device in enumerate(device_ids):
-            input_i = torch.stack(inputs[0][i*minibatch_size:(i+1)*minibatch_size])
+            # input_i = torch.stack(inputs[0][i*minibatch_size:(i+1)*minibatch_size])
+            input_i = inputs[0][i*minibatch_size:(i+1)*minibatch_size]
+            if len(input_i) > 1:
+                input_i = torch.stack(input_i)
+            else:
+                input_i = input_i[0]
             final_inputs += scatter(input_i, [device], self.dim) if inputs else []
         if len(device_ids) == 1:
             final_inputs = [final_inputs]
@@ -44,4 +49,4 @@ class GraphDataParallel(torch.nn.parallel.DataParallel):
         for output in outputs:  # Iterate over GPUs
             network_outputs = gather([output], output_device, dim=self.dim)
             results.extend(network_outputs)
-        return torch.stack(results)
+        return results

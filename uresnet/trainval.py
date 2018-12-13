@@ -37,18 +37,18 @@ class trainval(object):
         }, filename)
         self.tspent['save'] = time.time() - tstart
 
-    def train_step(self, data_blob,
-                   display_intermediate=True, epoch=None):
+    def train_step(self, data_blob, epoch=None, batch_size=1):
         tstart = time.time()
         self._loss = []  # Initialize loss accumulator
-        res_combined = self.forward(data_blob, display_intermediate, epoch)
+        res_combined = self.forward(data_blob,
+                                    epoch=epoch, batch_size=batch_size)
         # Run backward once for all the previous forward
         self.backward()
         self.tspent['train'] = time.time() - tstart
         self.tspent_sum['train'] += self.tspent['train']
         return res_combined
 
-    def forward(self, data_blob, display_intermediate=True, epoch=None):
+    def forward(self, data_blob, epoch=None, batch_size=1):
         """
         Run forward for
         flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)) times
@@ -58,19 +58,19 @@ class trainval(object):
             blob = {}
             for key in data_blob.keys():
                 blob[key] = data_blob[key][idx]
-            res = self._forward(blob, display_intermediate, epoch)
+            res = self._forward(blob,
+                                epoch=epoch)
             for key in res.keys():
                 if key not in res_combined:
                     res_combined[key] = res[key]
                 else:
                     res_combined[key].extend(res[key])
         # Average loss and acc over all the events in this batch
-        batch_size = len(res_combined['segmentation'])
         res_combined['accuracy'] = np.array(res_combined['accuracy']).sum() / batch_size
         res_combined['loss_seg'] = np.array(res_combined['loss_seg']).sum() / batch_size
         return res_combined
 
-    def _forward(self, data_blob, display_intermediate=True, epoch=None):
+    def _forward(self, data_blob, epoch=None):
         """
         data/label/weight are lists of size minibatch size.
         For sparse uresnet:
@@ -86,12 +86,8 @@ class trainval(object):
         with torch.set_grad_enabled(self._flags.TRAIN):
             # Segmentation
             data = [torch.as_tensor(d).cuda() for d in data]
-            print(data[0].size(), len(data))
             tstart = time.time()
             segmentation = self._net(data)
-            print('segmentation size', segmentation.size())
-            # if not isinstance(segmentation, list):
-            #     segmentation = [segmentation]
 
             # If label is given, compute the loss
             loss_seg, acc = 0., 0.

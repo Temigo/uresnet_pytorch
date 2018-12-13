@@ -201,9 +201,8 @@ class UResNet(nn.Module):
     def forward(self, input):
         """
         Can be 2D or 3D. Supports batch processing.
-        input size: B, C, N, N, (N,)
+        input size: B, C, (N,) * dim
         """
-        print('uresnet', input.size())
         conv_feature_map = {}
         #net = input.view(-1,self.num_inputs,self.image_size,self.image_size,self.image_size)
         net = F.pad(input, padding(self.conv1[0].kernel_size[0], self.conv1[0].stride[0], input.size()), mode='replicate')
@@ -235,6 +234,9 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         self.cross_entropy = torch.nn.CrossEntropyLoss(reduction='none')
 
     def forward(self, segmentation, data, label, weight):
+        """
+        Returns the sum over all events in batch of average loss/acc per event.
+        """
         total_loss = 0.
         total_acc = 0.
         assert len(segmentation) == len(data)
@@ -257,8 +259,5 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
 
             total_loss += loss
             total_acc += acc
-
-        total_loss = total_loss
-        total_acc = total_acc
 
         return total_loss, total_acc

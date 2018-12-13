@@ -31,13 +31,11 @@ class UResNet(torch.nn.Module):
         point_cloud[0] has 3 spatial coordinates + 1 batch coordinate + 1 feature
         shape of point_cloud[0] = (N, 4)
         """
-        # FIXME assumes (mini)batch size 1
-        coords = [p[:, 0:-1].float() for p in point_cloud][0]
-        features = [p[:, -1][:, None].float() for p in point_cloud][0]
-        #return [self.linear(self.sparseModel((coords,features)))]
+        coords = point_cloud[:, 0:-1].float()
+        features = point_cloud[:, -1][:, None].float()
         x = self.sparseModel((coords, features))
         x = self.linear(x)
-        return x
+        return [x]
 
 
 class SegmentationLoss(torch.nn.modules.loss._Loss):
@@ -51,31 +49,31 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         segmentation[0], label and weight are lists of size #gpus = batch_size.
         segmentation has only 1 element because UResNet returns only 1 element.
         label[0] has shape (N, 1) where N is #pts across minibatch_size events.
+        weight can be None.
         """
+        assert len(segmentation) == len(data)
+        assert len(data) == len(label)
+        if weight is not None:
+            assert len(data) == len(weight)
         batch_ids = [d[:, 3] for d in data]
-        # FIXME assumes batch size 1
-        # seg = torch.argmax(segmentation, dim=-1)
         total_loss = 0
         total_acc = 0
         total_count = 0
-        print(segmentation.size())
-        for i in range(len(self._flags.GPUS)):
-            segmentation_i = segmentation[]
-            total_loss += torch.mean(self.cross_entropy(segmentation[i],torch.squeeze(label[i],dim=-1).long()))
-            prediction = torch.argmax(segmentation[i],dim=-1)
-            total_acc += (prediction == torch.squeeze(label[i],dim=-1).long()).sum().item() / float(prediction.nelement())
-            total_count +=1
-            continue
+        # Loop over ?
+        for i in range(len(segmentation)):
+            # total_loss += torch.mean(self.cross_entropy(segmentation[i],torch.squeeze(label[i],dim=-1).long()))
+            # prediction = torch.argmax(segmentation[i],dim=-1)
+            # acc2 = (prediction == torch.squeeze(label[i],dim=-1).long()).sum().item() / float(prediction.nelement())
+            # total_acc += acc2
+            # print('acc global = ', acc2)
+            # continue
             for b in batch_ids[i].unique():
                 batch_index = batch_ids[i] == b
                 event_segmentation = segmentation[i][batch_index]
                 event_label = label[i][batch_index]
-                #if weight is not None:
-                #    event_weight = weight[i][batch_index]
 
                 event_label = torch.squeeze(event_label, dim=-1).long()
                 loss_seg = self.cross_entropy(event_segmentation, event_label)
-                #loss_seg = self.cross_entropy(event_segmentation, torch.squeeze(label[i][batch_index],dim=-1).long())
                 if weight is not None:
                     total_loss += torch.mean(loss_seg * weight[i][batch_index])
                 else:
@@ -84,9 +82,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
 
                 # Accuracy
                 predicted_labels = torch.argmax(event_segmentation, dim=-1)
-                acc = (predicted_labels == event_label).sum().item() / float(event_label.nelement())
+                acc = (predicted_labels == event_label).sum().item() / float(predicted_labels.nelement())
                 total_acc += acc
-        total_loss = total_loss / total_count
-        total_acc = total_acc / total_count
 
         return total_loss, total_acc

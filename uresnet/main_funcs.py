@@ -158,19 +158,18 @@ def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
     """
     Handles minibatching the data
     """
-    idx_v = []
-    data_blob = {'data':[]}
+    data_blob = {'data': [], 'idx_v': []}
     if label_key  is not None: data_blob['label' ] = []
     if weight_key is not None: data_blob['weight'] = []
 
     for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
         idx, blob = handlers.data_io.next()
         data_blob['data'].append(blob[data_key])
-        idx_v.append(idx)
+        data_blob['idx_v'].append(idx)
         if label_key  is not None: data_blob['label' ].append(blob[label_key ])
         if weight_key is not None: data_blob['weight'].append(blob[weight_key])
 
-    return idx_v, data_blob
+    return data_blob
 
 
 def train_loop(flags, handlers):
@@ -185,10 +184,11 @@ def train_loop(flags, handlers):
 
         checkpt_step = flags.CHECKPOINT_STEP and flags.WEIGHT_PREFIX and ((handlers.iteration+1) % flags.CHECKPOINT_STEP == 0)
 
-        idx_v, data_blob = get_data_minibatched(handlers, flags, data_key, label_key, weight_key)
+        data_blob = get_data_minibatched(handlers, flags, data_key, label_key, weight_key)
 
         # Train step
-        res = handlers.trainer.train_step(data_blob, epoch=float(epoch))
+        res = handlers.trainer.train_step(data_blob, epoch=float(epoch),
+                                          batch_size=flags.BATCH_SIZE)
         # Save snapshot
         if checkpt_step:
             handlers.trainer.save_state(handlers.iteration)
@@ -225,7 +225,8 @@ def inference_loop(flags, handlers):
             data_blob['weight'] = [blob[weight_key]]
 
         # Run inference
-        res = handlers.trainer.forward(data_blob)
+        res = handlers.trainer.forward(data_blob,
+                                       batch_size=flags.BATCH_SIZE)
         # Store output if requested
         if flags.OUTPUT_FILE:
             handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
