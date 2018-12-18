@@ -8,6 +8,14 @@ from torch.nn.parallel.scatter_gather import scatter, gather
 class GraphDataParallel(torch.nn.parallel.DataParallel):
     # FIXME TODO Assumes network has a single input for now
     # TODO add a case for dict
+
+    def __init__(self, module, device_ids=None, output_device=None, dim=0, dense=True):
+        super(GraphDataParallel, self).__init__(module,
+                                                device_ids=device_ids,
+                                                output_device=output_device,
+                                                dim=dim)
+        self._is_dense = dense
+
     def scatter(self, inputs, kwargs, device_ids):
         """
         len(inputs) = how many inputs the network takes
@@ -19,12 +27,12 @@ class GraphDataParallel(torch.nn.parallel.DataParallel):
 
         minibatch_size = int(len(inputs[0]) / len(device_ids))
         for i, device in enumerate(device_ids):
-            # input_i = torch.stack(inputs[0][i*minibatch_size:(i+1)*minibatch_size])
             input_i = inputs[0][i*minibatch_size:(i+1)*minibatch_size]
-            if len(input_i) > 1:
+            if self._is_dense:
                 input_i = torch.stack(input_i)
             else:
-                input_i = input_i[0]
+                if len(input_i) == 1:
+                    input_i = input_i[0]
             final_inputs += scatter(input_i, [device], self.dim) if inputs else []
         if len(device_ids) == 1:
             final_inputs = [final_inputs]

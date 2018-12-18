@@ -137,38 +137,51 @@ def compute_metrics_sparse(data_v, label_v, softmax_v):
     return res, dbscan_vv
 
 def compute_metrics_dense(data_v, label_v, softmax_v):
-    print(len(data_v), len(label_v), len(softmax_v[0]))
     assert len(data_v) == len(label_v)
     assert len(data_v) == len(softmax_v)
     res = {
         'acc': [],
-        'correct_softmax': [],
+        # 'correct_softmax': [],
         'id': [],
         'nonzero_pixels': [],
         'class_acc': [],
         'class_pixel': [],
-        'class_mean_softmax': [],
-        'cluster_acc': [],
-        'class_cluster_acc': [],
+        # 'class_mean_softmax': [],
+        # 'cluster_acc': [],
+        # 'class_cluster_acc': [],
     }
     dbscan_vv = []
     for i, label in enumerate(label_v):
-        data = data_v[i]
-        softmax = softmax_v[i]
-        print(data.shape, softmax.shape)
-        batch_size = data.shape[0]
-        for j in range(batch_size):
-            event_data = data[j, ...]
-            event_softmax = data[j, ...]
-            event_label = label_v[i][j, ...]
+        nonzero_idx = data_v[i] > 0.000001
+        event_data = data_v[i]
+        event_softmax = softmax_v[i]
+        event_label = label
+        # Non-zero Accuracy
+        predictions = np.argmax(event_softmax, axis=0)[None, ...]
+        acc = (event_label == predictions)[nonzero_idx].astype(np.int32).sum() / float(np.sum(nonzero_idx.astype(np.int32)))
+        res['acc'].append(acc)
+        # Softmax score of correct labels
+        # correct_softmax = event_softmax[np.arange(len(event_label)), event_label.reshape((-1,)).astype(np.int32)][:, None]
+        # res['correct_softmax'].append(np.mean(correct_softmax))
+        res['id'].append(i)
+        res['nonzero_pixels'].append(np.sum(nonzero_idx.astype(np.int32)))
 
-            # Non-zero Accuracy
-            predictions = np.argmax(event_softmax, axis=1)[:, None]
-            acc = (event_label == predictions).astype(np.int32).sum() / float(len(event_label))
-            res['acc'].append(acc)
-            # Softmax score of correct labels
-            # correct_softmax = event_softmax[np.arange(len(event_label)), event_label.reshape((-1,)).astype(np.int32)][:, None]
-            # res['correct_softmax'].append(np.mean(correct_softmax))
-            res['id'].append(j)
-            res['nonzero_pixels'].append(np.count_nonzero(event_label))
+        # print(event_label)
+        classes, class_count = np.unique(event_label, return_counts=True)
+        class_pixel = []
+        class_acc = []
+        # class_mean_softmax = []
+        # class_cluster_acc = []
+        for c in range(event_softmax.shape[0]):
+            if c < event_softmax.shape[0]-1:
+                class_index = event_label[nonzero_idx] == c
+                class_acc.append((event_label[nonzero_idx][class_index] == predictions[nonzero_idx][class_index]).astype(np.int32).sum() / float(class_index.astype(np.int32).sum()))
+                # class_mean_softmax.append(np.mean(correct_softmax[class_index]))
+                if c in classes:
+                    class_pixel.append(class_count[classes == c])
+                else:
+                    class_pixel.append(0)
+
+        res['class_acc'].append(class_acc)
+        res['class_pixel'].append(np.hstack(class_pixel))
     return res

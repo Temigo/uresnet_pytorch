@@ -128,7 +128,9 @@ class trainval(object):
         self.tspent_sum['forward'] = self.tspent_sum['train'] = self.tspent_sum['save'] = 0.
         self.tspent['forward'] = self.tspent['train'] = self.tspent['save'] = 0.
 
-        self._net = GraphDataParallel(model(self._flags), device_ids=self._flags.GPUS)
+        self._net = GraphDataParallel(model(self._flags),
+                                      device_ids=self._flags.GPUS,
+                                      dense=('sparse' not in self._flags.MODEL_NAME))
 
         if self._flags.TRAIN:
             self._net.train().cuda()
@@ -136,8 +138,7 @@ class trainval(object):
             self._net.eval().cuda()
 
         self._optimizer = torch.optim.Adam(self._net.parameters(), lr=self._flags.LEARNING_RATE)
-        # self._softmax = torch.nn.LogSoftmax(dim=1)
-        self._softmax = torch.nn.Softmax(dim=1)
+        self._softmax = torch.nn.Softmax(dim=0)
 
         iteration = 0
         if self._flags.MODEL_PATH:

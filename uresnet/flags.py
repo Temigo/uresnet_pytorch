@@ -95,7 +95,7 @@ class URESNET_FLAGS:
                             help='Depth for UResNet [default: %s]' % self.URESNET_NUM_STRIDES)
         parser.add_argument('-uf','--uresnet-filters',type=int,default=self.URESNET_FILTERS,
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
-        parser.add_argument('-bnm','--bn-momentum',type=int,default=self.BN_MOMENTUM,
+        parser.add_argument('-bnm','--bn-momentum',type=float,default=self.BN_MOMENTUM,
                             help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
         return parser
 
@@ -172,7 +172,7 @@ class URESNET_FLAGS:
         if not (self.BATCH_SIZE % (self.MINIBATCH_SIZE * len(self.GPUS))) == 0:
             print('BATCH_SIZE (-bs) must be multiples of MINIBATCH_SIZE (-mbs) and GPU count (--gpus)!')
             raise ValueError
-            
+
 if __name__ == '__main__':
     flags = URESNET_FLAGS()
     flags.parse_args()

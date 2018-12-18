@@ -223,7 +223,6 @@ class UResNet(nn.Module):
         net = self.conv2(net)
         net = F.pad(net, padding(self.conv3[0].kernel_size[0], self.conv3[0].stride[0], net.size()), mode='replicate')
         net = self.conv3(net)
-        print(net.size())
         return net
 
 
@@ -253,7 +252,6 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 loss *= weight[i]
             prediction = torch.argmax(event_segmentation, dim=1).squeeze(1)
             acc = (prediction == event_label)[nonzero_idx].sum().item() / float(nonzero_idx.long().sum().item())
-
             loss *= nonzero_idx.float()
             loss = loss.sum() / nonzero_idx.long().sum()
 
