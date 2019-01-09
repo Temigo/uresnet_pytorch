@@ -93,25 +93,34 @@ def process(input_data,output_data):
     if input_data.as_vector().size() < 1:
         output_data.set(input_data,input_data.meta())
         return
+
     #t0=time.time()
     voxels = np.zeros(shape=[input_data.as_vector().size(),3],dtype=np.int32)
     values = np.zeros(shape=[input_data.as_vector().size(),1],dtype=np.float32)
-    #print('c0', time.time()-t0)
+    #if debug>0: print('c0', time.time()-t0)
 
     #t0=time.time()
     from larcv import larcv
     larcv.fill_3d_voxels(input_data,voxels)
     larcv.fill_3d_pcloud(input_data,values)
-    #print('c1', time.time()-t0)
-    values=values.squeeze()
+    #if debug>0: print('c1', time.time()-t0)
+    values=values.squeeze(axis=1)
 
     #t0=time.time()
-    should_process = len(np.where(values>2)[0]) > 0
-    #print('c2', time.time()-t0)
+    no_correction = len(np.where(values>2)[0]) == 0
+    trivial_correction = len(np.where(values<3)[0]) == 0
+    #if debug>0: print('c2', time.time()-t0)
 
     # Nothing to correct, return
-    if not should_process:
+    if no_correction:
         output_data.set(input_data,input_data.meta())
+        return
+
+    # Only michel/delta ray, make them all shower
+    if trivial_correction:
+        values[:] = 2.
+        vs=larcv.as_tensor3d(voxels,values,input_data.meta(),-1.)
+        output_data.set(vs,input_data.meta())
         return
 
     # Reaching here means something to correct.
@@ -120,15 +129,15 @@ def process(input_data,output_data):
     others_idx,  others_vox  = dbscan(voxels,values,find_valmax=1.)
     deltas_idx,  deltas_vox  = dbscan(voxels,values,find_val=3.,min_samples=1)
     michels_idx, michels_vox = dbscan(voxels,values,find_val=4.,min_samples=1)
-    #print('c3', time.time()-t0)
+    #if debug>0: print('c3', time.time()-t0)
 
     #t0=time.time()
     correlated_deltas = correlate(others_vox,deltas_vox)
-    #print('c4', time.time()-t0)
+    #if debug>0: print('c4', time.time()-t0)
 
     #t0=time.time()
     correlated_michels = correlate(others_vox,michels_vox)
-    #print('c5', time.time()-t0)
+    #if debug>0: print('c5', time.time()-t0)
 
     #t0=time.time()
     for i, correlation in enumerate(correlated_deltas):
@@ -137,7 +146,7 @@ def process(input_data,output_data):
     for i, correlation in enumerate(correlated_michels):
         if correlation > 0: continue
         values[michels_idx[i]] = 2.
-    #print('c6', time.time()-t0)
+    #if debug>0: print('c6', time.time()-t0)
 
     vs=larcv.as_tensor3d(voxels,values,input_data.meta(),-1.)
     output_data.set(vs,input_data.meta())
@@ -196,7 +205,8 @@ def main():
     parser.add_argument('-ol','--output_label',type=str,default='label',help='Output data product label [default: label]')
     parser.add_argument('-s','--start',type=int,default=0,help='Start entry [default: 0]')
     parser.add_argument('-n','--num',type=int,default=-1,help='Number of entries to process [default: -1]')
-
+    parser.add_argument('-r','--report',type=int,default=100,help='Number of steps to print out process record [default: 100]')
+    #parser.add_argument('-d','--debug',type=int,default=0,help='Enable debug mode [default: 0]')
     args = parser.parse_args()
 
     if args.input_file is None or args.output_file is None:
@@ -236,7 +246,7 @@ def main():
 
         tspent.ctr += 1.
 
-        if int(tspent.ctr) % 100 == 0:
+        if int(tspent.ctr) % args.report == 0:
             print(tspent.report())
 
         current_entry += 1
