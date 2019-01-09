@@ -120,8 +120,11 @@ class io_larcv_sparse(io_base):
         self._blob['voxels'] = []
         self._blob['feature'] = []
         for key in self._flags.DATA_KEYS:
-            ch_blob[key] = TChain('%s_%s_tree' % (dtype_keyword, key))
             self._blob[key] = []
+            if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
+                continue
+            ch_blob[key] = TChain('%s_%s_tree' % (dtype_keyword, key))
+
         # ch_data   = TChain('%s_%s_tree' % (dtype_keyword,self._flags.DATA_KEY))
         # ch_label  = None
         # if self._flags.LABEL_KEY:
@@ -139,6 +142,7 @@ class io_larcv_sparse(io_base):
         total_sample = 0.
         total_point = 0.
         total_data = 0.
+
         for i in range(ach.GetEntries()):
             if self._flags.LIMIT_NUM_SAMPLE > 0 and i == self._flags.LIMIT_NUM_SAMPLE:
                 break
@@ -188,11 +192,23 @@ class io_larcv_sparse(io_base):
 
             # for the rest, different treatment
             for key in self._flags.DATA_KEYS[1:]:
+                if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
+                    continue
                 br = br_blob[key]
                 np_data = np.zeros(shape=(num_point,1),dtype=np.float32)
                 larcv.fill_3d_pcloud(br,np_data)
                 total_data += np_data.size
                 self._blob[key].append(np_data)
+
+            # if weights need to be computed, compute here using label (index 1)
+            if self._flags.COMPUTE_WEIGHT:
+                labels  = self._blob[self._flags.DATA_KEYS[1]][-1]
+                weights = np.zeros(shape=labels.shape,dtype=np.float32)
+                classes,counts = np.unique(labels,return_counts=True)
+                for i in range(len(classes)):
+                    idx = np.where(labels == float(i))[0]
+                    weights[idx] = 1./(len(classes))/len(idx)
+                self._blob[self._flags.DATA_KEYS[2]].append(weights)
 
             total_point  += num_point
             total_sample += 1.
