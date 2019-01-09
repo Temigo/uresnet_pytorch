@@ -207,7 +207,7 @@ class io_larcv_sparse(io_base):
                 classes,counts = np.unique(labels,return_counts=True)
                 for i in range(len(classes)):
                     idx = np.where(labels == float(i))[0]
-                    weights[idx] = 1./(len(classes))/len(idx)
+                    weights[idx] = 1./(len(classes))/counts[i]
                 self._blob[self._flags.DATA_KEYS[2]].append(weights)
 
             total_point  += num_point

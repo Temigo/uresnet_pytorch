@@ -25,7 +25,7 @@ class URESNET_FLAGS:
     BN_MOMENTUM = 0.9
 
     # flags for train/inference
-    COMPUTE_WEIGHTS= False
+    COMPUTE_WEIGHT = False
     SEED           = -1
     LEARNING_RATE  = 0.001
     GPUS           = [0]
@@ -179,7 +179,7 @@ class URESNET_FLAGS:
                 # Compute weights if specified
         if self.COMPUTE_WEIGHT:
             if len(self.DATA_KEYS)>2:
-                sys.stderr.write('ERROR: cannot compute weight if producer is specified ("%s")\n' % self..DATA_KEYS[2])
+                sys.stderr.write('ERROR: cannot compute weight if producer is specified ("%s")\n' % self.DATA_KEYS[2])
                 raise KeyError
             if '_weights_' in self.DATA_KEYS:
                 sys.stderr.write('ERROR: cannot compute weight if any data has label "_weights_"\n')
