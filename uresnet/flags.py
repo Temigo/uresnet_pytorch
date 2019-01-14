@@ -97,6 +97,8 @@ class URESNET_FLAGS:
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
         parser.add_argument('-bnm','--bn-momentum',type=float,default=self.BN_MOMENTUM,
                             help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
+        parser.add_argument('-sd','--seed', default=self.SEED,
+                                  help='Seed for random number generators [default: %s]' % self.SEED)
         return parser
 
     def _build_parsers(self):
@@ -106,8 +108,6 @@ class URESNET_FLAGS:
 
         # train parser
         train_parser = subparsers.add_parser("train", help="Train Edge-GCNN")
-        train_parser.add_argument('-sd','--seed', default=self.SEED,
-                                  help='Seed for random number generators [default: %s]' % self.SEED)
         train_parser.add_argument('-wp','--weight_prefix', default=self.WEIGHT_PREFIX,
                                   help='Prefix (directory + file prefix) for snapshots of weights [default: %s]' % self.WEIGHT_PREFIX)
         train_parser.add_argument('-lr','--learning_rate', type=float, default=self.LEARNING_RATE,
@@ -159,6 +159,8 @@ class URESNET_FLAGS:
         if self.SEED < 0:
             import time
             self.SEED = int(time.time())
+        else:
+            self.SEED = int(self.SEED)
         # Batch size checker
         if self.BATCH_SIZE < 0 and self.MINIBATCH_SIZE < 0:
             print('Cannot have both BATCH_SIZE (-bs) and MINIBATCH_SIZE (-mbs) negative values!')

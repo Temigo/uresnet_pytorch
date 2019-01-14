@@ -49,6 +49,7 @@ MainIO: {
     Verbosity:    2
     EnableFilter: true
     RandomAccess: %d
+    RandomSeed: %d
     %s
     %s
     %s
@@ -59,7 +60,7 @@ MainIO: {
     }
 }
 '''
-    cfg = cfg % (random,input_filelist, proctypes, procnames, proccfg)
+    cfg = cfg % (random, flags.SEED, input_filelist, proctypes, procnames, proccfg)
     cfg_file = tempfile.NamedTemporaryFile('w')
     cfg_file.write(cfg)
     cfg_file.flush()

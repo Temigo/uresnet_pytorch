@@ -288,7 +288,8 @@ def full_inference_loop(flags, handlers):
                 data_blob['weight'] = [blob[weight_key]]
 
             # Run inference
-            res = handlers.trainer.forward(data_blob)
+            res = handlers.trainer.forward(data_blob,
+                                           batch_size=flags.BATCH_SIZE)
 
             # Store output if requested
             # if flags.OUTPUT_FILE:

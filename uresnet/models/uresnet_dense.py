@@ -242,7 +242,6 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         assert len(data) == len(label)
         if weight is not None:
             assert len(weight) == len(label)
-
         for i in range(len(data)):
             nonzero_idx = data[i] > 0.000001
             event_segmentation = segmentation[i].unsqueeze(0)
