@@ -213,6 +213,7 @@ def inference_loop(flags, handlers):
     handlers.data_io.next()
     handlers.data_io.next()
     while handlers.iteration < flags.ITERATION:
+        epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
         tstart_iteration = time.time()
 
@@ -226,13 +227,18 @@ def inference_loop(flags, handlers):
             data_blob['weight'] = [blob[weight_key]]
 
         # Run inference
-        res = handlers.trainer.forward(data_blob,
+        res = handlers.trainer.forward(data_blob, epoch=float(epoch),
                                        batch_size=flags.BATCH_SIZE)
+        print('segmentation',
+              np.unique(np.argmax(res['segmentation'][0], axis=0)[(data_blob['data'][0]>0)[0, 0, ...]], return_counts=True),
+              np.unique(np.argmax(res['segmentation'][0], axis=0), return_counts=True))
+        print('label',
+              np.unique(data_blob['label'][0][(data_blob['data'][0]>0)], return_counts=True),
+              np.unique(data_blob['label'][0], return_counts=True))
         # Store output if requested
         if flags.OUTPUT_FILE:
             handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
 
-        epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         tspent_iteration = time.time() - tstart_iteration
         tsum += tspent_iteration
         log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)

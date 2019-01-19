@@ -16,29 +16,29 @@ def make_input_larcv_cfg(flags):
     proctypes = 'ProcessType: ['
     procnames = 'ProcessName: ['
     proccfg   = ''
-    if flags.DATA_DIM==3:
-        proctypes += '"EmptyTensorFilter",'
-        procnames += '"EmptyTensorFilter",'
-        cfg = 'EmptyTensorFilter: { MinVoxel%dDCount: 10 Tensor%dDProducer: "%s" }\n'
-        cfg = cfg % (flags.DATA_DIM,flags.DATA_DIM,flags.DATA_KEYS[0])
-        proccfg   += cfg
-        for i,key in enumerate(flags.DATA_KEYS):
-            proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
-            procnames += '"%s",' % key
-            if i == 1:
-                # special treatment for "label"
-                cfg = '        %s: { Tensor%dDProducer: "%s" EmptyVoxelValue: %d }\n'
-                cfg = cfg % (key,flags.DATA_DIM,key,flags.NUM_CLASS-1)
-                proccfg += cfg
-            else:
-                cfg = '        %s: { Tensor%dDProducer: "%s" }\n'
-                cfg = cfg % (key,flags.DATA_DIM,key)
-                proccfg += cfg
-    else:
-        for i,key in enumerate(flags.DATA_KEYS):
-            proctypes += '"BatchFillerImage2D",'
-            procnames += '"%s",' % key
-            proccfg += ' %s: { ImageProducer: "%s" }\n' % (key,key)
+    # if flags.DATA_DIM==3:
+    proctypes += '"EmptyTensorFilter",'
+    procnames += '"EmptyTensorFilter",'
+    cfg = 'EmptyTensorFilter: { MinVoxel%dDCount: 10 Tensor%dDProducer: "%s" }\n'
+    cfg = cfg % (flags.DATA_DIM,flags.DATA_DIM,flags.DATA_KEYS[0])
+    proccfg   += cfg
+    for i,key in enumerate(flags.DATA_KEYS):
+        proctypes += '"BatchFillerTensor%dD",' % flags.DATA_DIM
+        procnames += '"%s",' % key
+        if i == 1:
+            # special treatment for "label"
+            cfg = '        %s: { Tensor%dDProducer: "%s" EmptyVoxelValue: %d }\n'
+            cfg = cfg % (key,flags.DATA_DIM,key,flags.NUM_CLASS-1)
+            proccfg += cfg
+        else:
+            cfg = '        %s: { Tensor%dDProducer: "%s" }\n'
+            cfg = cfg % (key,flags.DATA_DIM,key)
+            proccfg += cfg
+    # else:
+    #     for i,key in enumerate(flags.DATA_KEYS):
+    #         proctypes += '"BatchFillerImage2D",'
+    #         procnames += '"%s",' % key
+    #         proccfg += ' %s: { ImageProducer: "%s" }\n' % (key,key)
     proctypes=proctypes[0:proctypes.rfind(',')] + ']'
     procnames=procnames[0:procnames.rfind(',')] + ']'
     random = 0
@@ -127,6 +127,7 @@ class io_larcv_dense(io_base):
         self._ihandler.next(store_entries=True,store_event_ids=True)
         self._next_counter = 0
         self._num_entries = self._ihandler._proc.pd().io().get_n_entries()
+        print('hi')
         self._num_channels = self._ihandler.fetch_data(self._flags.DATA_KEYS[0]).dim()[-1]
 
         if self._flags.OUTPUT_FILE:
@@ -169,7 +170,8 @@ class io_larcv_dense(io_base):
 
         nonzero = (data > 0).astype(np.float32).squeeze(0)
         score = np.max(softmax,axis=0) * nonzero
-        prediction = np.argmax(softmax,axis=0).astype(np.float32) * nonzero
+        # FIXME class 0 will not be shown in larcv-viewer
+        prediction = (np.argmax(softmax,axis=0).astype(np.float32)+1.0) * nonzero
 
         larcv_softmax = self._fout.get_data(datatype,'softmax')
         vs = to_voxelset(score)
@@ -195,9 +197,6 @@ class io_larcv_dense(io_base):
                 blob[key] = np.array(np.swapaxes(np.swapaxes(np.swapaxes(data,4,3),3,2),2,1))
             else:
                 blob[key] = np.array(np.swapaxes(np.swapaxes(data,3,2),2,1))
-            #blob[key] = []
-            #for gpu in range(len(self._flags.GPUS)):
-            #    blob[key].append(data[gpu*self.batch_per_gpu():(gpu+1)*self.batch_per_gpu()])
         idx = np.array(self._ihandler.fetch_entries())
         self._next_counter += 1
         return idx, blob
