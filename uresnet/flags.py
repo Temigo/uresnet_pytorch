@@ -98,6 +98,9 @@ class URESNET_FLAGS:
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
         parser.add_argument('-bnm','--bn-momentum',type=float,default=self.BN_MOMENTUM,
                             help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
+        parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT,type=strtobool,
+                            help='Compute pixel loss weighting factor on the fly [default: %s' % self.COMPUTE_WEIGHT)
+
         return parser
 
     def _build_parsers(self):
@@ -107,8 +110,6 @@ class URESNET_FLAGS:
 
         # train parser
         train_parser = subparsers.add_parser("train", help="Train Edge-GCNN")
-        train_parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT,type=strtobool,
-                                  help='Compute pixel loss weighting factor on the fly [default: %s' % self.COMPUTE_WEIGHT)
         train_parser.add_argument('-sd','--seed', default=self.SEED,
                                   help='Seed for random number generators [default: %s]' % self.SEED)
         train_parser.add_argument('-wp','--weight_prefix', default=self.WEIGHT_PREFIX,

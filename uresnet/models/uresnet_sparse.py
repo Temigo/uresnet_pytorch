@@ -71,11 +71,16 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 batch_index = batch_ids[i] == b
                 event_segmentation = segmentation[i][batch_index]
                 event_label = label[i][batch_index]
-
                 event_label = torch.squeeze(event_label, dim=-1).long()
                 loss_seg = self.cross_entropy(event_segmentation, event_label)
                 if weight is not None:
-                    total_loss += torch.mean(loss_seg * weight[i][batch_index])
+                    event_weight = weight[i][batch_index]
+                    event_weight = torch.squeeze(event_weight, dim=-1).float()
+                    total_loss += torch.mean(loss_seg * event_weight)
+                    #print(loss_seg.shape)
+                    #print(event_weight.shape)
+                    #print((total_loss * event_weight).shape)
+                    #total_loss += torch.mean(loss_seg * weight[i][batch_index])
                 else:
                     total_loss += torch.mean(loss_seg)
                 total_count += 1

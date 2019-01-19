@@ -139,16 +139,18 @@ class io_larcv_sparse(io_base):
         # br_data,br_label=(None,None)
         ach = ch_blob.values()[0]
         event_fraction = 1./ach.GetEntries() * 100.
+        if self._flags.LIMIT_NUM_SAMPLE > 0:
+            event_fraction = 1./self._flags.LIMIT_NUM_SAMPLE * 100.
         total_sample = 0.
         total_point = 0.
         total_data = 0.
 
-        for i in range(ach.GetEntries()):
-            if self._flags.LIMIT_NUM_SAMPLE > 0 and i == self._flags.LIMIT_NUM_SAMPLE:
+        for entry in range(ach.GetEntries()):
+            if self._flags.LIMIT_NUM_SAMPLE > 0 and entry == self._flags.LIMIT_NUM_SAMPLE:
                 break
             for key, ch in ch_blob.iteritems():
-                ch.GetEntry(i)
-                if i == 0:
+                ch.GetEntry(entry)
+                if entry == 0:
                     br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
             num_point = br_blob.values()[0].as_vector().size()
             if num_point < 1: continue
@@ -205,14 +207,14 @@ class io_larcv_sparse(io_base):
                 labels  = self._blob[self._flags.DATA_KEYS[1]][-1]
                 weights = np.zeros(shape=labels.shape,dtype=np.float32)
                 classes,counts = np.unique(labels,return_counts=True)
-                for i in range(len(classes)):
-                    idx = np.where(labels == float(i))[0]
-                    weights[idx] = 1./(len(classes))/counts[i]
+                for c in range(len(classes)):
+                    idx = np.where(labels == float(c))[0]
+                    weights[idx] = float(len(labels))/(len(classes))/counts[c]
                 self._blob[self._flags.DATA_KEYS[2]].append(weights)
 
             total_point  += num_point
             total_sample += 1.
-            sys.stdout.write('Processed %d samples (%d%% ... %d MB\r' % (int(total_sample),int(event_fraction*i),int(total_data*4/1.e6)))
+            sys.stdout.write('Processed %d samples (%d%% ... %d MB\r' % (int(total_sample),int(event_fraction*entry),int(total_data*4/1.e6)))
             sys.stdout.flush()
 
         sys.stdout.write('\n')
