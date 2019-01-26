@@ -138,7 +138,7 @@ class trainval(object):
             self._net.eval().cuda()
 
         self._optimizer = torch.optim.Adam(self._net.parameters(), lr=self._flags.LEARNING_RATE)
-        self._softmax = torch.nn.Softmax(dim=0)
+        self._softmax = torch.nn.Softmax(dim=1 if 'sparse' in self._flags.MODEL_NAME else 0)
 
         iteration = 0
         if self._flags.MODEL_PATH:
