@@ -311,37 +311,54 @@ IOManager: {
             raise ValueError
         keys = self._event_keys[idx]
         meta = self._metas[idx]
+        dtype_keyword  = ''
+        if self._flags.DATA_DIM == 3:
+            as_numpy_voxels = larcv.fill_3d_voxels
+            as_numpy_pcloud = larcv.fill_3d_pcloud
+            as_tensor = larcv.as_tensor3d
+            dtype_keyword   = 'sparse3d'
+            as_meta = larcv.Voxel3DMeta
+        elif self._flags.DATA_DIM == 2:
+            as_numpy_voxels = larcv.fill_2d_voxels
+            as_numpy_pcloud = larcv.fill_2d_pcloud
+            dtype_keyword   = 'sparse2d'
+            as_meta = larcv.ImageMeta
+            as_tensor = larcv.as_tensor2d
 
         data_key = self._flags.DATA_KEYS[0]
 
-        larcv_data = self._fout.get_data('sparse3d',data_key)
+        larcv_data = self._fout.get_data(dtype_keyword, data_key)
         voxel   = self._blob['voxels'][idx]
         feature = self._blob['feature'][idx].reshape([-1])
-        vs = larcv.as_tensor3d(voxel,feature,meta,0.)
+        if self._flags.DATA_DIM == 3:
+            vs = as_tensor(voxel,feature,meta,0.)
+        elif self._flags.DATA_DIM == 2:
+            data = self._blob[self._flags.DATA_KEYS[0]][idx].reshape((-1,))
+            vs = as_tensor(data, np.arange(data.shape[0]))
         larcv_data.set(vs,meta)
 
         score = np.max(softmax,axis=1).reshape([-1])
         prediction = np.argmax(softmax,axis=1).astype(np.float32).reshape([-1])
 
-        larcv_softmax = self._fout.get_data('sparse3d','softmax')
-        vs = larcv.as_tensor3d(voxel,score,meta,-1.)
+        larcv_softmax = self._fout.get_data(dtype_keyword,'softmax')
+        vs = as_tensor(voxel,score,meta,-1.)
         larcv_softmax.set(vs,meta)
 
-        larcv_prediction = self._fout.get_data('sparse3d','prediction')
-        vs = larcv.as_tensor3d(voxel,prediction,meta,-1.)
+        larcv_prediction = self._fout.get_data(dtype_keyword,'prediction')
+        vs = as_tensor(voxel,prediction,meta,-1.)
         larcv_prediction.set(vs,meta)
 
         for keyword in kwargs:
             values = kwargs[keyword].reshape([-1]).astype(np.float32)
-            larcv_arg = self._fout.get_data('sparse3d', keyword)
-            vs = larcv.as_tensor3d(voxel, values, meta, -1.)
+            larcv_arg = self._fout.get_data(dtype_keyword, keyword)
+            vs = as_tensor(voxel, values, meta, -1.)
             larcv_arg.set(vs, meta)
 
         if len(self._flags.DATA_KEYS) > 1:
             label = self.blob()[self._flags.DATA_KEYS[1]][idx]
             label = label.astype(np.float32).reshape([-1])
-            larcv_label = self._fout.get_data('sparse3d','label')
-            vs = larcv.as_tensor3d(voxel,label,meta,-1.)
+            larcv_label = self._fout.get_data(dtype_keyword,'label')
+            vs = as_tensor(voxel,label,meta,-1.)
             larcv_label.set(vs,meta)
         self._fout.set_id(keys[0],keys[1],keys[2])
         self._fout.save_entry()

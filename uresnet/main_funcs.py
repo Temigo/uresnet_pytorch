@@ -126,9 +126,9 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         if flags.TRAIN:
             handlers.csv_logger.record(('ttrain','tsave','tsumtrain','tsumsave'),
                                        (tmap['train'],tmap['save'],tsum_map['train'],tsum_map['save']))
-        else:
-            handlers.csv_logger.record(('tforward','tsave','tsumforward','tsumsave'),
-                                       (tmap['forward'],tmap['save'],tsum_map['forward'],tsum_map['save']))
+        # else:
+        handlers.csv_logger.record(('tforward','tsave','tsumforward','tsumsave'),
+                                   (tmap['forward'],tmap['save'],tsum_map['forward'],tsum_map['save']))
 
         handlers.csv_logger.record(('loss_seg','acc_seg'),(loss_seg,acc_seg))
         handlers.csv_logger.write()
@@ -269,10 +269,11 @@ def full_inference_loop(flags, handlers):
     weights = glob.glob(flags.MODEL_PATH)
     print(weights)
     idx_v, blob_v = [], []
-    for i in range(flags.ITERATION):
-        idx, blob = handlers.data_io.next()
-        idx_v.append(idx)
-        blob_v.append(blob)
+    if flags.ITERATION <= 100:
+        for i in range(flags.ITERATION):
+            idx, blob = handlers.data_io.next()
+            idx_v.append(idx)
+            blob_v.append(blob)
 
     for weight in weights:
         handlers.trainer._flags.MODEL_PATH = weight
@@ -282,8 +283,10 @@ def full_inference_loop(flags, handlers):
             tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             tstart_iteration = time.time()
 
-            # idx, blob = handlers.data_io.next()
-            idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
+            if flags.ITERATION > 100:
+                idx, blob = handlers.data_io.next()
+            else:
+                idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
 
             data_blob = {}
             data_blob['data'] = [blob[data_key]]
@@ -327,12 +330,8 @@ def full_inference_loop(flags, handlers):
             # class_acc = np.array(metrics['class_acc'])
             # low_michel = class_acc[:, -1].mean() <= 0.6
             # michel_pixel = np.array(metrics['class_pixel'])[:, -1]
-            # if flags.OUTPUT_FILE and low_michel and michel_pixel[0] > 200:
-            #     print(idx, class_acc,np.array( metrics['class_cluster_acc'])[:, -1], michel_pixel)
-            #     if label_key is None:
-            #         handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
-            #     else:
-            #         handlers.data_io.store_segment(idx, blob[data_key], res['softmax'], clusters=dbscans)
+            if flags.OUTPUT_FILE and handlers.iteration in [438, 439, 440, 441, 442, 443]:#np.mean(metrics['acc']) <= 0.96897185:  # and low_michel and michel_pixel[0] > 200:
+                handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
             handlers.iteration += 1
 
     # Metrics
@@ -364,12 +363,12 @@ def full_inference_loop(flags, handlers):
                 (res['iteration'][i], idx, res['acc'][i], res['nonzero_pixels'][i]))
         if 'correct_softmax' in res:
             handlers.metrics_logger.record(('correct_softmax',), (res['correct_softmax'][i],))
-        if 'cluster_acc' in res:
-            handlers.metrics_logger.record(('cluster_acc',), (res['cluster_acc'][i],))
+        # if 'cluster_acc' in res:
+        #     handlers.metrics_logger.record(('cluster_acc',), (res['cluster_acc'][i],))
         if 'class_acc' in res:
             handlers.metrics_logger.record(['class_%d_acc' % c for c in range(len(res['class_acc'][i]))], [res['class_acc'][i][c] for c in range(len(res['class_acc'][i]))])
-        if 'class_cluster_acc' in res:
-            handlers.metrics_logger.record(['class_%d_cluster_acc' % c for c in range(len(res['class_cluster_acc'][i]))], [res['class_cluster_acc'][i][c] for c in range(len(res['class_cluster_acc'][i]))])
+        # if 'class_cluster_acc' in res:
+        #     handlers.metrics_logger.record(['class_%d_cluster_acc' % c for c in range(len(res['class_cluster_acc'][i]))], [res['class_cluster_acc'][i][c] for c in range(len(res['class_cluster_acc'][i]))])
         if 'class_pixel' in res:
             handlers.metrics_logger.record(['class_%d_pixel' % c for c in range(len(res['class_pixel'][i]))], [res['class_pixel'][i][c] for c in range(len(res['class_pixel'][i]))])
         if 'class_mean_softmax' in res:

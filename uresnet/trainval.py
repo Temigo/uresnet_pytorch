@@ -8,6 +8,8 @@ import sys
 from uresnet.ops import GraphDataParallel
 import uresnet.models as models
 import numpy as np
+import matplotlib
+from matplotlib import pyplot as plt
 
 
 class trainval(object):
@@ -82,7 +84,11 @@ class trainval(object):
         data = data_blob['data']
         label = data_blob.get('label', None)
         weight = data_blob.get('weight', None)
-
+        # matplotlib.image.imsave('data0.png', data[0, 0, ...])
+        # matplotlib.image.imsave('data1.png', data[1, 0, ...])
+        # print(label.shape, np.unique(label, return_counts=True))
+        # matplotlib.image.imsave('label0.png', label[0, 0, ...])
+        # matplotlib.image.imsave('label1.png', label[1, 0, ...])
         with torch.set_grad_enabled(self._flags.TRAIN):
             # Segmentation
             data = [torch.as_tensor(d).cuda() for d in data]
