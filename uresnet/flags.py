@@ -25,6 +25,7 @@ class URESNET_FLAGS:
     BN_MOMENTUM = 0.9
 
     # flags for train/inference
+    COMPUTE_WEIGHT = False
     SEED           = -1
     LEARNING_RATE  = 0.001
     GPUS           = [0]
@@ -97,6 +98,8 @@ class URESNET_FLAGS:
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
         parser.add_argument('-bnm','--bn-momentum',type=float,default=self.BN_MOMENTUM,
                             help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
+        parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT,type=strtobool,
+                            help='Compute pixel loss weighting factor on the fly [default: %s' % self.COMPUTE_WEIGHT)
         parser.add_argument('-sd','--seed', default=self.SEED,
                                   help='Seed for random number generators [default: %s]' % self.SEED)
         return parser
@@ -174,6 +177,19 @@ class URESNET_FLAGS:
         if not (self.BATCH_SIZE % (self.MINIBATCH_SIZE * len(self.GPUS))) == 0:
             print('BATCH_SIZE (-bs) must be multiples of MINIBATCH_SIZE (-mbs) and GPU count (--gpus)!')
             raise ValueError
+        # Check compute_weight option
+                # Compute weights if specified
+        if self.COMPUTE_WEIGHT:
+            if len(self.DATA_KEYS)>2:
+                sys.stderr.write('ERROR: cannot compute weight if producer is specified ("%s")\n' % self.DATA_KEYS[2])
+                raise KeyError
+            if '_weights_' in self.DATA_KEYS:
+                sys.stderr.write('ERROR: cannot compute weight if any data has label "_weights_"\n')
+                raise KeyError
+            if len(self.DATA_KEYS) < 2:
+                sys.stderr.write('ERROR: you must provide data and label (2 data product keys) to compute weights\n')
+                raise KeyError
+            self.DATA_KEYS.append('_weights_')
 
 if __name__ == '__main__':
     flags = URESNET_FLAGS()

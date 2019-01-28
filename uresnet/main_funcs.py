@@ -103,7 +103,7 @@ def get_keys(flags):
     if len(flags.DATA_KEYS) > 1:
         label_key = flags.DATA_KEYS[1]
     if len(flags.DATA_KEYS) > 2:
-        label_key = flags.DATA_KEYS[2]
+        weight_key = flags.DATA_KEYS[2]
     return data_key, label_key, weight_key
 
 def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
