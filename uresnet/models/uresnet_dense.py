@@ -252,7 +252,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
             prediction = torch.argmax(event_segmentation, dim=1).squeeze(1)
             acc = (prediction == event_label)[nonzero_idx].sum().item() / float(nonzero_idx.long().sum().item())
             loss *= nonzero_idx.float()
-            loss = loss.sum() / nonzero_idx.long().sum()
+            loss = loss.sum() / nonzero_idx.long().sum().item()
 
             total_loss += loss
             total_acc += acc
