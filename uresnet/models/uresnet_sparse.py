@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 import torch
 import sparseconvnet as scn
-import time
 
 
 class UResNet(torch.nn.Module):
@@ -61,12 +60,6 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         total_count = 0
         # Loop over ?
         for i in range(len(segmentation)):
-            # total_loss += torch.mean(self.cross_entropy(segmentation[i],torch.squeeze(label[i],dim=-1).long()))
-            # prediction = torch.argmax(segmentation[i],dim=-1)
-            # acc2 = (prediction == torch.squeeze(label[i],dim=-1).long()).sum().item() / float(prediction.nelement())
-            # total_acc += acc2
-            # print('acc global = ', acc2)
-            # continue
             for b in batch_ids[i].unique():
                 batch_index = batch_ids[i] == b
                 event_segmentation = segmentation[i][batch_index]
@@ -77,10 +70,6 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                     event_weight = weight[i][batch_index]
                     event_weight = torch.squeeze(event_weight, dim=-1).float()
                     total_loss += torch.mean(loss_seg * event_weight)
-                    #print(loss_seg.shape)
-                    #print(event_weight.shape)
-                    #print((total_loss * event_weight).shape)
-                    #total_loss += torch.mean(loss_seg * weight[i][batch_index])
                 else:
                     total_loss += torch.mean(loss_seg)
                 total_count += 1

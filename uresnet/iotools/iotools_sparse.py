@@ -7,6 +7,80 @@ import threading
 import time
 from uresnet.iotools.io_base import io_base
 
+
+def get_particle_info(particle_v):
+    from larcv import larcv
+    num_particles = particle_v.size()
+    part_info = {'particle_idx' : np.arange(0,num_particles),
+                 'primary'      : np.zeros(num_particles,np.int8),
+                 'pdg_code'     : np.zeros(num_particles,np.int32),
+                 'mass'         : np.zeros(num_particles,np.float32),
+                 'creation_x'   : np.zeros(num_particles,np.float32),
+                 'creation_y'   : np.zeros(num_particles,np.float32),
+                 'creation_z'   : np.zeros(num_particles,np.float32),
+                 'direction_x'  : np.zeros(num_particles,np.float32),
+                 'direction_y'  : np.zeros(num_particles,np.float32),
+                 'direction_z'  : np.zeros(num_particles,np.float32),
+                 'start_x'      : np.zeros(num_particles,np.float32),
+                 'start_y'      : np.zeros(num_particles,np.float32),
+                 'start_z'      : np.zeros(num_particles,np.float32),
+                 'end_x'        : np.zeros(num_particles,np.float32),
+                 'end_y'        : np.zeros(num_particles,np.float32),
+                 'end_z'        : np.zeros(num_particles,np.float32),
+                 'creation_energy'   : np.zeros(num_particles,np.float32),
+                 'creation_momentum' : np.zeros(num_particles,np.float32),
+                 'deposited_energy'  : np.zeros(num_particles,np.float32),
+                 'npx'               : np.zeros(num_particles,np.int32),
+                 'creation_process'  : ['']*num_particles,
+                 'category'          : np.zeros(num_particles,np.int8)
+                 }
+
+    for idx in range(num_particles):
+        particle = particle_v[idx]
+        pdg_code = particle.pdg_code()
+        mass     = larcv.ParticleMass(pdg_code)
+        momentum = np.float32(np.sqrt(np.power(particle.px(),2)+
+                                      np.power(particle.py(),2)+
+                                      np.power(particle.pz(),2)))
+
+        part_info[ 'primary'     ][idx] = np.int8(particle.track_id() == particle.parent_track_id())
+        part_info[ 'pdg_code'    ][idx] = np.int32(pdg_code)
+        part_info[ 'mass'        ][idx] = np.float32(mass)
+        part_info[ 'creation_x'  ][idx] = np.float32(particle.x())
+        part_info[ 'creation_y'  ][idx] = np.float32(particle.y())
+        part_info[ 'creation_z'  ][idx] = np.float32(particle.z())
+        part_info[ 'direction_x' ][idx] = np.float32(particle.px()/momentum)
+        part_info[ 'direction_y' ][idx] = np.float32(particle.py()/momentum)
+        part_info[ 'direction_z' ][idx] = np.float32(particle.pz()/momentum)
+        part_info[ 'start_x'     ][idx] = np.float32(particle.first_step().x())
+        part_info[ 'start_y'     ][idx] = np.float32(particle.first_step().y())
+        part_info[ 'start_z'     ][idx] = np.float32(particle.first_step().z())
+        part_info[ 'end_x'       ][idx] = np.float32(particle.last_step().x())
+        part_info[ 'end_y'       ][idx] = np.float32(particle.last_step().y())
+        part_info[ 'end_z'       ][idx] = np.float32(particle.last_step().z())
+        part_info[ 'creation_energy'   ][idx] = np.float32(particle.energy_init() - mass)
+        part_info[ 'creation_momentum' ][idx] = momentum
+        part_info[ 'deposited_energy'  ][idx] = np.float32(particle.energy_deposit())
+        part_info[ 'npx'               ][idx] = np.int32(particle.num_voxels())
+
+        category = -1
+        process  = particle.creation_process()
+        if(pdg_code == 2212 or pdg_code == -2212): category = 0
+        elif not pdg_code in [11,-11,22]: category = 1
+        elif pdg_code == 22: category = 2
+        else:
+            if process in ['primary','nCapture','conv','compt']: category = 2
+            elif process in ['muIoni','hIoni']: category = 3
+            elif process in ['muMinusCaptureAtRest','muPlusCaptureAtRest','Decay']: category = 4
+            else:
+                print('Unidentified process found: PDG=%d creation_process="%s"' % (pdg_code,process))
+                raise ValueError
+
+        part_info[ 'creation_process'  ][idx] = process
+        part_info[ 'category'          ][idx] = category
+    return part_info
+
+
 def threadio_func(io_handle, thread_id):
     """
     Structure of returned blob:
@@ -26,6 +100,7 @@ def threadio_func(io_handle, thread_id):
             voxel_v   = []
             feature_v = []
             new_idx_v = []
+            particles_v = []
             # label_v   = []
             blob = {}
             for key, val in io_handle.blob().iteritems():
@@ -56,6 +131,7 @@ def threadio_func(io_handle, thread_id):
                 voxel_v.append([])
                 feature_v.append([])
                 new_idx_v.append([])
+                particles_v.append([])
                 for key in io_handle._flags.DATA_KEYS:
                     blob[key].append([])
 
@@ -65,12 +141,18 @@ def threadio_func(io_handle, thread_id):
                 voxel_v[new_id].append(np.pad(voxel, [(0,0),(0,1)],'constant',constant_values=data_id))
                 feature_v[new_id].append(io_handle.blob()['feature'][idx])
                 new_idx_v[new_id].append(idx)
+                if 'particles' in io_handle.blob():
+                    particles = io_handle.blob()['particles'][idx]
+                    particles['batch_id'] = data_id
+                    particles_v[new_id].append(particles)
                 for key in io_handle._flags.DATA_KEYS:
                     blob[key][new_id].append(io_handle.blob()[key][idx])
                 # if len(io_handle._label):
                 #     label_v.append(io_handle._label[idx])
             blob['voxels']  = [np.vstack(voxel_v[i]) for i in range(num_gpus)]
             blob['feature'] = [np.vstack(feature_v[i]) for i in range(num_gpus)]
+            if len(particles_v) > 0:
+                blob['particles'] = particles_v
             new_idx_v = [np.array(x) for x in new_idx_v]
             # if len(label_v): label_v = np.hstack(label_v)
             for key in io_handle._flags.DATA_KEYS:
@@ -121,12 +203,15 @@ class io_larcv_sparse(io_base):
         br_blob = {}
         self._blob['voxels'] = []
         self._blob['feature'] = []
+        if self._flags.PARTICLE:
+            self._blob['particles'] = []
         for key in self._flags.DATA_KEYS:
             self._blob[key] = []
             if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
                 continue
             ch_blob[key] = TChain('%s_%s_tree' % (dtype_keyword, key))
-
+        if self._flags.PARTICLE:
+            ch_blob['mcst'] = TChain('particle_mcst_tree')
         # ch_data   = TChain('%s_%s_tree' % (dtype_keyword,self._flags.DATA_KEY))
         # ch_label  = None
         # if self._flags.LABEL_KEY:
@@ -153,7 +238,10 @@ class io_larcv_sparse(io_base):
             for key, ch in ch_blob.iteritems():
                 ch.GetEntry(entry)
                 if entry == 0:
-                    br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
+                    if key == 'mcst':
+                        br_blob[key] = getattr(ch, 'particle_mcst_branch')
+                    else:
+                        br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
 
 
             # ch_data.GetEntry(i)
@@ -228,6 +316,11 @@ class io_larcv_sparse(io_base):
                     idx = np.where(labels == float(c))[0]
                     weights[idx] = float(len(labels))/(len(classes))/counts[c]
                 self._blob[self._flags.DATA_KEYS[2]].append(weights)
+
+            if self._flags.PARTICLE:
+                particle_v = br_blob['mcst'].as_vector()
+                part_info = get_particle_info(particle_v)
+                self._blob['particles'].append(part_info)
 
             total_point  += num_point
             total_sample += 1.

@@ -4,10 +4,25 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import numpy as np
 # Accelerate *if all input sizes are same*
 # torch.backends.cudnn.benchmark = True
 
+def printbn(self, input, output):
+    print('Inside ' + self.__class__.__name__ + ' forward')
+    mean = input[0].mean(dim=0)
+    var = input[0].var(dim=0)
+    print('input', input[0].size(), input[0].mean(), input[0].var(), output[0].size())
+    print(mean, var, torch.isnan(input[0]).any())
+    print('output', output[0].mean(dim=0))
+
+def printconv(self, input, output):
+    print('Inside ' + self.__class__.__name__ + ' forward')
+    mean = input[0].mean(dim=0)
+    var = input[0].var(dim=0)
+    print('input', input[0].size(), output[0].size())
+    print(mean, var, torch.isnan(input[0]).any())
+    print('output', output[0].mean(dim=0))
 
 def get_conv(is_3d):
     if is_3d:
@@ -42,7 +57,7 @@ class ResNetModule(nn.Module):
                 stride      = stride,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs, momentum=bn_momentum)
+            batch_norm(num_features = num_outputs, momentum=bn_momentum, track_running_stats=False)
         )
 
         # residual path
@@ -54,7 +69,7 @@ class ResNetModule(nn.Module):
                 stride      = stride,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs, momentum=bn_momentum)
+            batch_norm(num_features = num_outputs, momentum=bn_momentum, track_running_stats=False)
         )
 
         self.residual2 = torch.nn.Sequential(
@@ -65,7 +80,7 @@ class ResNetModule(nn.Module):
                 stride      = 1,
                 padding     = 0
             ),
-            batch_norm(num_features = num_outputs, momentum=bn_momentum)
+            batch_norm(num_features = num_outputs, momentum=bn_momentum, track_running_stats=False)
         )
 
     def forward(self, input_tensor):
@@ -132,9 +147,13 @@ class UResNet(nn.Module):
                 stride = 1,
                 padding = 0 # FIXME 'same' in tensorflow
             ),
-            batch_norm(num_features=self.base_num_outputs, momentum=self._flags.BN_MOMENTUM),
+            batch_norm(num_features=self.base_num_outputs, momentum=self._flags.BN_MOMENTUM, track_running_stats=False),
             torch.nn.ReLU()
         )
+        # self.conv1[0].register_forward_hook(printconv)
+        # self.conv1[-2].register_forward_hook(printbn)
+        # print(dir(self.conv1[-2]))
+        # print(self.conv1[-2].running_mean, self.conv1[-2].running_var)
         # Encoding steps
         self.double_resnet = nn.ModuleList()
         current_num_outputs = self.base_num_outputs
@@ -170,7 +189,7 @@ class UResNet(nn.Module):
                     padding=1,
                     output_padding=1
                 ),
-                batch_norm(num_features=int(current_num_outputs / 2), momentum=self._flags.BN_MOMENTUM),
+                batch_norm(num_features=int(current_num_outputs / 2), momentum=self._flags.BN_MOMENTUM, track_running_stats=False),
                 torch.nn.ReLU()
             ))
             current_num_outputs = int(current_num_outputs / 2)
@@ -183,7 +202,7 @@ class UResNet(nn.Module):
                 kernel_size = 3,
                 stride = 1
             ),
-            batch_norm(num_features=current_num_outputs, momentum=self._flags.BN_MOMENTUM),
+            batch_norm(num_features=current_num_outputs, momentum=self._flags.BN_MOMENTUM, track_running_stats=False),
             torch.nn.ReLU()
         )
 
@@ -195,7 +214,7 @@ class UResNet(nn.Module):
                 kernel_size = 3,
                 stride = 1
             ),
-            batch_norm(num_features=self.num_classes, momentum=self._flags.BN_MOMENTUM)
+            batch_norm(num_features=self.num_classes, momentum=self._flags.BN_MOMENTUM, track_running_stats=False)
         )
 
     def forward(self, input):
@@ -203,6 +222,9 @@ class UResNet(nn.Module):
         Can be 2D or 3D. Supports batch processing.
         input size: B, C, (N,) * dim
         """
+        # print(self.conv1[-2].running_mean, self.conv1[-2].running_var)
+        # print(self.conv1[-2].weight, self.conv1[-2].bias)
+        # print('input uresnet', input.mean(dim=0))
         conv_feature_map = {}
         #net = input.view(-1,self.num_inputs,self.image_size,self.image_size,self.image_size)
         net = F.pad(input, padding(self.conv1[0].kernel_size[0], self.conv1[0].stride[0], input.size()), mode='replicate')
@@ -223,6 +245,8 @@ class UResNet(nn.Module):
         net = self.conv2(net)
         net = F.pad(net, padding(self.conv3[0].kernel_size[0], self.conv3[0].stride[0], net.size()), mode='replicate')
         net = self.conv3(net)
+        # print(self.conv1[-2].running_mean, self.conv1[-2].running_var)
+        # print(self.conv1[-2].weight, self.conv1[-2].bias)
         return net
 
 

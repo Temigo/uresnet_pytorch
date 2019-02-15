@@ -154,8 +154,20 @@ class trainval(object):
             print('Restoring weights from %s...' % self._flags.MODEL_PATH)
             with open(self._flags.MODEL_PATH, 'rb') as f:
                 checkpoint = torch.load(f)
-                self._net.load_state_dict(checkpoint['state_dict'])
-                self._optimizer.load_state_dict(checkpoint['optimizer'])
+                # print(checkpoint['state_dict']['module.conv1.1.running_mean'],
+                #       checkpoint['state_dict']['module.conv1.1.running_var'])
+                # for key in checkpoint['state_dict']:
+                #     if key not in self._net.state_dict():
+                #         checkpoint['state_dict'].pop(key, None)
+                #         print('Ignoring %s' % key)
+                # new_state = self._net.state_dict()
+                # new_state.update(checkpoint['state_dict'])
+                self._net.load_state_dict(checkpoint['state_dict'], strict=False)
+                if self._flags.TRAIN:
+                    # This overwrites the learning rate, so reset the learning rate
+                    self._optimizer.load_state_dict(checkpoint['optimizer'])
+                    for g in self._optimizer.param_groups:
+                        g['lr'] = self._flags.LEARNING_RATE
                 iteration = checkpoint['global_step'] + 1
             print('Done.')
 

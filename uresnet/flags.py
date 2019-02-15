@@ -49,6 +49,7 @@ class URESNET_FLAGS:
     LIMIT_NUM_SAMPLE = -1
     NUM_THREADS = 1
     DATA_DIM = 3
+    PARTICLE = False
 
     def __init__(self):
         self._build_parsers()
@@ -98,7 +99,7 @@ class URESNET_FLAGS:
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
         parser.add_argument('-bnm','--bn-momentum',type=float,default=self.BN_MOMENTUM,
                             help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
-        parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT,type=strtobool,
+        parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT, action='store_true',
                             help='Compute pixel loss weighting factor on the fly [default: %s' % self.COMPUTE_WEIGHT)
         parser.add_argument('-sd','--seed', default=self.SEED,
                                   help='Seed for random number generators [default: %s]' % self.SEED)
@@ -122,6 +123,8 @@ class URESNET_FLAGS:
         inference_parser = subparsers.add_parser("inference",help="Run inference of Edge-GCNN")
         inference_parser.add_argument('-full', '--full', default=self.FULL, action='store_true',
                                       help='Full inference mode [default: %s]' % self.FULL)
+        inference_parser.add_argument('-p', '--particle', default=self.PARTICLE, action='store_true',
+                                      help='Include particle branch [default: %s]' % self.PARTICLE)
         # IO test parser
         iotest_parser = subparsers.add_parser("iotest", help="Test iotools for Edge-GCNN")
 
