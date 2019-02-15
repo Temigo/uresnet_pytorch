@@ -2,11 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import torch
-import sparseconvnet as scn
 
 
 class UResNet(torch.nn.Module):
     def __init__(self, flags):
+        import sparseconvnet as scn
         super(UResNet, self).__init__()
         self._flags = flags
         dimension = flags.DATA_DIM
