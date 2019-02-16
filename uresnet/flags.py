@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import argparse
 import os
+import sys
 from uresnet.main_funcs import train, iotest, inference
 from distutils.util import strtobool
 
@@ -48,6 +49,7 @@ class URESNET_FLAGS:
     SHUFFLE    = 1
     LIMIT_NUM_SAMPLE = -1
     NUM_THREADS = 1
+    NUM_THREADS_INIT = 1
     DATA_DIM = 3
     PARTICLE = False
 
@@ -89,6 +91,8 @@ class URESNET_FLAGS:
                             help='Limit number of samples to read from input file [default: %s]' % self.LIMIT_NUM_SAMPLE)
         parser.add_argument('-nt','--num-threads',type=int,default=self.NUM_THREADS,
                             help='Number of threads to read input file [default: %s]' % self.NUM_THREADS)
+        parser.add_argument('-nti','--num-threads-init',type=int,default=self.NUM_THREADS_INIT,
+                            help='Number of threads to read input file [default: %s]' % self.NUM_THREADS_INIT)
         parser.add_argument('-dd','--data-dim',type=int,default=self.DATA_DIM,
                             help='Data dimension [default: %s]' % self.DATA_DIM)
         parser.add_argument('-ss','--spatial_size',type=int,default=self.SPATIAL_SIZE,
@@ -193,6 +197,7 @@ class URESNET_FLAGS:
                 sys.stderr.write('ERROR: you must provide data and label (2 data product keys) to compute weights\n')
                 raise KeyError
             self.DATA_KEYS.append('_weights_')
+
 
 if __name__ == '__main__':
     flags = URESNET_FLAGS()

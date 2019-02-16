@@ -4,6 +4,7 @@ from __future__ import print_function
 import numpy as np
 import sys
 import threading
+import multiprocessing
 import time
 from uresnet.iotools.io_base import io_base
 
@@ -162,6 +163,91 @@ def threadio_func(io_handle, thread_id):
             io_handle._locks[thread_id] = True
     return
 
+
+def threadio_init_func(io_handle, thread_id):
+    br_blob = {}
+    data_key = io_handle._flags.DATA_KEYS[0]
+    while 1:
+        # Fetch current entry number
+        entry = io_handle._entry_idx[thread_id]
+        if entry >= io_handle.num_entries() or (io_handle._flags.LIMIT_NUM_SAMPLE > 0 and entry == io_handle._flags.LIMIT_NUM_SAMPLE):
+            io_handle._is_done[thread_id] = True
+            break
+        io_handle._entry_idx[thread_id] = entry + len(io_handle._threads_init)
+
+        # Get entry from all TChains
+        for key, ch in io_handle._ch_blobs[thread_id].iteritems():
+            ch.GetEntry(entry)
+            if key not in br_blob:
+                if key == 'mcst':
+                    br_blob[key] = getattr(ch, 'particle_mcst_branch')
+                else:
+                    br_blob[key] = getattr(ch, '%s_%s_branch' % (io_handle._dtype_keyword, key))
+
+        io_handle._event_keys[entry] = (br_blob[data_key].run(),
+                                        br_blob[data_key].subrun(),
+                                        br_blob[data_key].event())
+
+        if io_handle._flags.DATA_DIM == 2:
+            num_point = br_blob[data_key].as_vector().front().as_vector().size()
+        else:
+            num_point = br_blob[data_key].as_vector().size()
+        if num_point < 1: return  # FIXME what to do here
+
+        # special treatment for the data
+        br_data = br_blob[data_key]
+        if io_handle._flags.DATA_DIM == 2:
+            br_data = br_data.as_vector().front()
+        np_data  = np.zeros(shape=(num_point, io_handle._flags.DATA_DIM+1), dtype=np.float32)
+        io_handle._as_numpy_pcloud(br_data, np_data)
+        io_handle._blob[data_key][entry] = np_data
+        io_handle._total_data[thread_id] += np_data.size
+
+        io_handle._metas[entry] = io_handle._as_meta(br_data.meta())
+
+        np_voxel   = np.zeros(shape=(num_point, io_handle._flags.DATA_DIM), dtype=np.int32)
+        io_handle._as_numpy_voxels(br_data, np_voxel)
+        io_handle._blob['voxels'][entry] = np_voxel
+        io_handle._total_data[thread_id] += np_voxel.size
+
+        np_feature = np.zeros(shape=(num_point, 1), dtype=np.float32)
+        io_handle._as_numpy_pcloud(br_data, np_feature)
+        io_handle._blob['feature'][entry] = np_feature
+        io_handle._total_data[thread_id] += np_feature.size
+
+        # for the rest, different treatment
+        for key in io_handle._flags.DATA_KEYS[1:]:
+            if io_handle._flags.COMPUTE_WEIGHT and key == io_handle._flags.DATA_KEYS[2]:
+                continue
+            br = br_blob[key]
+            if io_handle._flags.DATA_DIM == 2:
+                br = br.as_vector().front()
+            np_data = np.zeros(shape=(num_point, 1), dtype=np.float32)
+            io_handle._as_numpy_pcloud(br, np_data)
+            io_handle._blob[key][entry] = np_data
+            io_handle._total_data[thread_id] += np_data.size
+
+        # if weights need to be computed, compute here using label (index 1)
+        if io_handle._flags.COMPUTE_WEIGHT:
+            labels  = io_handle._blob[io_handle._flags.DATA_KEYS[1]][entry]
+            weights = np.zeros(shape=labels.shape, dtype=np.float32)
+            classes, counts = np.unique(labels, return_counts=True)
+            for c in range(len(classes)):
+                idx = np.where(labels == float(c))[0]
+                weights[idx] = float(len(labels))/(len(classes))/counts[c]
+            io_handle._blob[io_handle._flags.DATA_KEYS[2]][entry] = weights
+            io_handle._total_data[thread_id] += weights.size
+
+        if io_handle._flags.PARTICLE:
+            particle_v = br_blob['mcst'].as_vector()
+            part_info = get_particle_info(particle_v)
+            io_handle._blob['particles'][entry] = part_info
+
+        io_handle._num_entries_processed[thread_id] += 1
+        io_handle._num_points_processed[thread_id] += num_point
+    return
+
+
 class io_larcv_sparse(io_base):
 
     def __init__(self, flags):
@@ -177,162 +263,117 @@ class io_larcv_sparse(io_base):
         self._last_buffer_id = -1
         self.set_index_start(0)
 
-    def initialize(self):
-        self._event_keys = []
-        self._metas = []
-        # configure the input
+        # For initialization threads
+        self._threads_init = [None] * flags.NUM_THREADS_INIT
+        self._entry_idx = [-1] * flags.NUM_THREADS_INIT
+        self._ch_blobs = [None] * flags.NUM_THREADS_INIT
+        self._total_data = [0.0] * flags.NUM_THREADS_INIT
+        self._num_entries_processed = [0.0] * flags.NUM_THREADS_INIT
+        self._num_points_processed = [0.0] * flags.NUM_THREADS_INIT
+        self._is_done = [False] * flags.NUM_THREADS_INIT
+
+        # For LArCV functions in 2D/3D
+        self._dtype_keyword = ''
+        self._as_numpy_voxels = None
+        self._as_numpy_pcloud = None
+        self._as_meta = None
+        self._as_tensor = None
+
+    def init_larcv(self):
         from larcv import larcv
-        from ROOT import TChain
+        self._IOManager = larcv.IOManager
         # set 2d vs. 3d functions
-        dtype_keyword  = ''
         if self._flags.DATA_DIM == 3:
-            as_numpy_voxels = larcv.fill_3d_voxels
-            as_numpy_pcloud = larcv.fill_3d_pcloud
-            dtype_keyword   = 'sparse3d'
-            as_meta = larcv.Voxel3DMeta
+            self._as_numpy_voxels = larcv.fill_3d_voxels
+            self._as_numpy_pcloud = larcv.fill_3d_pcloud
+            self._dtype_keyword   = 'sparse3d'
+            self._as_meta = larcv.Voxel3DMeta
+            self._as_tensor = larcv.as_tensor3d
         elif self._flags.DATA_DIM == 2:
-            as_numpy_voxels = larcv.fill_2d_voxels
-            as_numpy_pcloud = larcv.fill_2d_pcloud
-            dtype_keyword   = 'sparse2d'
-            as_meta = larcv.ImageMeta
+            self._as_numpy_voxels = larcv.fill_2d_voxels
+            self._as_numpy_pcloud = larcv.fill_2d_pcloud
+            self._dtype_keyword   = 'sparse2d'
+            self._as_meta = larcv.ImageMeta
+            self._as_tensor = larcv.as_tensor2d
         else:
             print('larcv IO not implemented for data dimension', self._flags.DATA_DIM)
             raise NotImplementedError
 
-        ch_blob = {}
-        br_blob = {}
-        self._blob['voxels'] = []
-        self._blob['feature'] = []
+    def initialize_buffer(self, num_entries):
+        # Prepare output buffers
+        self._blob['voxels'] = [None] * num_entries
+        self._blob['feature'] = [None] * num_entries
         if self._flags.PARTICLE:
-            self._blob['particles'] = []
+            self._blob['particles'] = [None] * num_entries
         for key in self._flags.DATA_KEYS:
-            self._blob[key] = []
-            if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
-                continue
-            ch_blob[key] = TChain('%s_%s_tree' % (dtype_keyword, key))
-        if self._flags.PARTICLE:
-            ch_blob['mcst'] = TChain('particle_mcst_tree')
-        # ch_data   = TChain('%s_%s_tree' % (dtype_keyword,self._flags.DATA_KEY))
-        # ch_label  = None
-        # if self._flags.LABEL_KEY:
-        #     ch_label  = TChain('%s_%s_tree' % (dtype_keyword,self._flags.LABEL_KEY))
-        for f in self._flags.INPUT_FILE:
-            for ch in ch_blob.values():
-                ch.AddFile(f)
+            self._blob[key] = [None] * num_entries
+        self._event_keys = [None] * num_entries
+        self._metas = [None] * num_entries
 
-        # self._voxel   = []
-        # self._feature = []
-        # self._label   = []
-        # br_data,br_label=(None,None)
-        ach = ch_blob.values()[0]
-        event_fraction = 1./ach.GetEntries() * 100.
-        if self._flags.LIMIT_NUM_SAMPLE > 0:
-            event_fraction = 1./self._flags.LIMIT_NUM_SAMPLE * 100.
-        total_sample = 0.
-        total_point = 0.
-        total_data = 0.
+    def initialize(self):
+        # configure the input
+        from ROOT import TChain
+        self.init_larcv()
 
-        for entry in range(ach.GetEntries()):
-            if self._flags.LIMIT_NUM_SAMPLE > 0 and entry == self._flags.LIMIT_NUM_SAMPLE:
-                break
-            for key, ch in ch_blob.iteritems():
-                ch.GetEntry(entry)
-                if entry == 0:
-                    if key == 'mcst':
-                        br_blob[key] = getattr(ch, 'particle_mcst_branch')
-                    else:
-                        br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
-
-
-            # ch_data.GetEntry(i)
-            # if ch_label:  ch_label.GetEntry(i)
-            # if br_data is None:
-            #     br_data  = getattr(ch_data, '%s_%s_branch' % (dtype_keyword,self._flags.DATA_KEY))
-            #     if ch_label:  br_label  = getattr(ch_label, '%s_%s_branch' % (dtype_keyword,self._flags.LABEL_KEY))
-
-            self._event_keys.append((br_blob[self._flags.DATA_KEYS[0]].run(),
-                                     br_blob[self._flags.DATA_KEYS[0]].subrun(),
-                                     br_blob[self._flags.DATA_KEYS[0]].event()))
-            # print(dir(br_blob[self._flags.DATA_KEYS[0]].sparse_tensor_2d()))
-            #
-
-            # HACK that should go away when unifying 2d and 3d data reps...
-            # if self._flags.DATA_DIM == 2:
-            #     for key in br_blob:
-            #         br_blob[key] = br_blob[key].as_vector().front()
-            #         print(key, br_blob[key])
-
-            if self._flags.DATA_DIM == 2:
-                num_point = br_blob[self._flags.DATA_KEYS[0]].as_vector().front().as_vector().size()
-            else:
-                num_point = br_blob[self._flags.DATA_KEYS[0]].as_vector().size()
-            if num_point < 1: continue
-
-            # special treatment for the data
-            br_data = br_blob[self._flags.DATA_KEYS[0]]
-            if self._flags.DATA_DIM == 2:
-                br_data = br_data.as_vector().front()
-            np_data  = np.zeros(shape=(num_point, self._flags.DATA_DIM+1),dtype=np.float32)
-            as_numpy_pcloud(br_data, np_data)
-            total_data += np_data.size
-            self._blob[self._flags.DATA_KEYS[0]].append(np_data)
-
-            self._metas.append(as_meta(br_data.meta()))
-
-            # FIXME HACK that should go away when unifying 2d and 3d data reps...
-            # if self._flags.DATA_DIM == 2:
-            #     self._metas.append(larcv.ImageMeta(br_label.meta()))
-            # else:
-            #     self._metas.append(larcv.Voxel3DMeta(br_data.meta()))
-
-            np_voxel   = np.zeros(shape=(num_point,self._flags.DATA_DIM),dtype=np.int32)
-            as_numpy_voxels(br_data, np_voxel)
-            total_data += np_voxel.size
-            self._blob['voxels'].append(np_voxel)
-
-            np_feature = np.zeros(shape=(num_point,1),dtype=np.float32)
-            as_numpy_pcloud(br_data,  np_feature)
-            total_data += np_feature.size
-            self._blob['feature'].append(np_feature)
-
-            # for the rest, different treatment
-            for key in self._flags.DATA_KEYS[1:]:
+        # start threads
+        if self._threads_init[0] is not None:
+            return
+        for thread_id in range(len(self._threads_init)):
+            print('Starting thread init', thread_id)
+            self._ch_blobs[thread_id] = {}
+            for key in self._flags.DATA_KEYS:
                 if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
                     continue
-                br = br_blob[key]
-                if self._flags.DATA_DIM == 2:
-                    br = br.as_vector().front()
-                np_data = np.zeros(shape=(num_point,1),dtype=np.float32)
-                as_numpy_pcloud(br,np_data)
-                total_data += np_data.size
-                self._blob[key].append(np_data)
-
-            # if weights need to be computed, compute here using label (index 1)
-            if self._flags.COMPUTE_WEIGHT:
-                labels  = self._blob[self._flags.DATA_KEYS[1]][-1]
-                weights = np.zeros(shape=labels.shape,dtype=np.float32)
-                classes,counts = np.unique(labels,return_counts=True)
-                for c in range(len(classes)):
-                    idx = np.where(labels == float(c))[0]
-                    weights[idx] = float(len(labels))/(len(classes))/counts[c]
-                self._blob[self._flags.DATA_KEYS[2]].append(weights)
-
+                self._ch_blobs[thread_id][key] = TChain('%s_%s_tree' % (self._dtype_keyword, key))
             if self._flags.PARTICLE:
-                particle_v = br_blob['mcst'].as_vector()
-                part_info = get_particle_info(particle_v)
-                self._blob['particles'].append(part_info)
+                self._ch_blobs[thread_id]['mcst'] = TChain('particle_mcst_tree')
+            for f in self._flags.INPUT_FILE:
+                for ch in self._ch_blobs[thread_id].values():
+                    ch.AddFile(f)
+            if self._num_entries < 0:
+                self._num_entries = self._ch_blobs[0].values()[0].GetEntries()
+                if self._flags.LIMIT_NUM_SAMPLE > 0:
+                    self._num_entries = self._flags.LIMIT_NUM_SAMPLE
+                self.initialize_buffer(self._num_entries)
+            self._entry_idx[thread_id] = thread_id
+            self._threads_init[thread_id] = threading.Thread(target=threadio_init_func,
+                                                             args=[self, thread_id])
+            self._threads_init[thread_id].daemon = True
+            self._threads_init[thread_id].start()
 
-            total_point  += num_point
-            total_sample += 1.
-            sys.stdout.write('Processed %d samples (%d%% ... %d MB\r' % (int(total_sample),int(event_fraction*entry),int(total_data*4/1.e6)))
+        if self._num_entries == 0:
+            raise Exception("No entries found in data file.")
+        event_fraction = 1./self._num_entries * 100.
+        if self._flags.LIMIT_NUM_SAMPLE > 0:
+            event_fraction = 1./self._flags.LIMIT_NUM_SAMPLE * 100.
+        total_point = 0.
+        total_data = 0.
+        entry = 0
+        is_done = False
+        while entry < self._num_entries and not is_done:
+            entry = 0
+            total_point = 0.0
+            total_data = 0.0
+            time.sleep(0.001)
+            is_done = True
+            for buffer_id in range(len(self._threads_init)):
+                # Process blob
+                entry += self._num_entries_processed[thread_id]
+                total_point  += self._num_points_processed[thread_id]
+                total_data += self._total_data[thread_id]
+                is_done = is_done & self._is_done[thread_id]
+
+            sys.stdout.write('Processed %d samples (%d%% ... %d MB\r' % (entry,int(event_fraction*entry),int(total_data*4/1.e6)))
             sys.stdout.flush()
+            # print(self._is_done)
 
         sys.stdout.write('\n')
-        sys.stdout.write('Total: %d samples (%d points) ... %d MB\n' % (total_sample,total_point,total_data*4/1.e6))
+        sys.stdout.write('Total: %d samples (%d points) ... %d MB\n' % (entry,total_point,total_data*4/1.e6))
         sys.stdout.flush()
+
+        # Prepare output file if necessary
         data = self._blob[self._flags.DATA_KEYS[0]]
         self._num_channels = data[0].shape[-1]
-        self._num_entries = len(data)
         # Output
         if self._flags.OUTPUT_FILE:
             import tempfile
@@ -352,10 +393,10 @@ IOManager: {
             cfg_file = tempfile.NamedTemporaryFile('w')
             cfg_file.write(cfg)
             cfg_file.flush()
-            self._fout = larcv.IOManager(cfg_file.name)
+            self._fout = self._IOManager(cfg_file.name)
             self._fout.initialize()
 
-    def set_index_start(self,idx):
+    def set_index_start(self, idx):
         self.stop_threads()
         for i in range(len(self._threads)):
             self._start_idx[i] = idx + i * self.batch_per_step()
@@ -364,8 +405,9 @@ IOManager: {
         if self._threads[0] is not None:
             return
         for thread_id in range(len(self._threads)):
-            print('Starting thread',thread_id)
-            self._threads[thread_id] = threading.Thread(target = threadio_func, args=[self,thread_id])
+            print('Starting thread', thread_id)
+            self._threads[thread_id] = threading.Thread(target=threadio_func,
+                                                        args=[self, thread_id])
             self._threads[thread_id].daemon = True
             self._threads[thread_id].start()
 
@@ -373,13 +415,12 @@ IOManager: {
         if self._threads[0] is None:
             return
         for i in range(len(self._threads)):
-            while self._locks[buffer_id]:
+            while self._locks[i]:
                 time.sleep(0.000001)
             self._buffs[i] = None
             self._start_idx[i] = -1
 
-    def _next(self,buffer_id=-1,release=True):
-
+    def _next(self, buffer_id=-1, release=True):
         if buffer_id >= len(self._locks):
             sys.stderr.write('Invalid buffer id requested: {:d}\n'.format(buffer_id))
             raise ValueError
@@ -396,82 +437,69 @@ IOManager: {
             self._buffs[buffer_id] = None
             self._locks[buffer_id] = False
             self._last_buffer_id   = buffer_id
-
         return res
 
-    def store_segment(self,idx_vv,data_vv,softmax_vv, **kwargs):
-        for batch,idx_v in enumerate(idx_vv):
-            start,end = (0,0)
+    def store_segment(self, idx_vv, data_vv, softmax_vv, **kwargs):
+        for batch, idx_v in enumerate(idx_vv):
+            start, end = (0, 0)
             softmax_v = softmax_vv[batch]
             args_v = [kwargs[keyword][batch] for keyword in kwargs]
-            for i,idx in enumerate(idx_v):
+            for i, idx in enumerate(idx_v):
                 voxels = self.blob()['voxels'][idx]
                 end    = start + len(voxels)
-                softmax = softmax_v[start:end,:]
+                softmax = softmax_v[start:end, :]
                 args_event = [arg_v[start:end, :] for arg_v in args_v]
                 start = end
-                self.store_one_segment(idx,softmax, **dict(zip(kwargs.keys(), args_event)))
+                self.store_one_segment(idx, softmax, **dict(zip(kwargs.keys(), args_event)))
             start = end
 
     def store_one_segment(self, idx, softmax, **kwargs):
-        from larcv import larcv
         if self._fout is None:
             return
-        idx=int(idx)
+        idx = int(idx)
         if idx >= self.num_entries():
             raise ValueError
         keys = self._event_keys[idx]
         meta = self._metas[idx]
-        dtype_keyword  = ''
-        if self._flags.DATA_DIM == 3:
-            as_numpy_voxels = larcv.fill_3d_voxels
-            as_numpy_pcloud = larcv.fill_3d_pcloud
-            as_tensor = larcv.as_tensor3d
-            dtype_keyword   = 'sparse3d'
-            as_meta = larcv.Voxel3DMeta
-        elif self._flags.DATA_DIM == 2:
-            as_numpy_voxels = larcv.fill_2d_voxels
-            as_numpy_pcloud = larcv.fill_2d_pcloud
-            dtype_keyword   = 'sparse2d'
-            as_meta = larcv.ImageMeta
-            as_tensor = larcv.as_tensor2d
+        if self._as_tensor is None:
+            self.init_larcv()
 
         data_key = self._flags.DATA_KEYS[0]
 
-        larcv_data = self._fout.get_data(dtype_keyword, data_key)
+        larcv_data = self._fout.get_data(self._dtype_keyword, data_key)
         voxel   = self._blob['voxels'][idx]
         feature = self._blob['feature'][idx].reshape([-1])
         if self._flags.DATA_DIM == 3:
-            vs = as_tensor(voxel,feature,meta,0.)
+            vs = self._as_tensor(voxel, feature, meta, 0.)
         elif self._flags.DATA_DIM == 2:
             data = self._blob[self._flags.DATA_KEYS[0]][idx].reshape((-1,))
-            vs = as_tensor(data, np.arange(data.shape[0]))
-        larcv_data.set(vs,meta)
+            vs = self._as_tensor(data, np.arange(data.shape[0]))
+        larcv_data.set(vs, meta)
 
-        score = np.max(softmax,axis=1).reshape([-1])
-        prediction = np.argmax(softmax,axis=1).astype(np.float32).reshape([-1])
+        score = np.max(softmax, axis=1).reshape([-1])
+        prediction = np.argmax(softmax, axis=1).astype(np.float32).reshape([-1])
 
-        larcv_softmax = self._fout.get_data(dtype_keyword,'softmax')
-        vs = as_tensor(voxel,score,meta,-1.)
-        larcv_softmax.set(vs,meta)
+        larcv_softmax = self._fout.get_data(self._dtype_keyword, 'softmax')
+        vs = self._as_tensor(voxel, score, meta, -1.)
+        larcv_softmax.set(vs, meta)
 
-        larcv_prediction = self._fout.get_data(dtype_keyword,'prediction')
-        vs = as_tensor(voxel,prediction,meta,-1.)
-        larcv_prediction.set(vs,meta)
+        larcv_prediction = self._fout.get_data(self._dtype_keyword, 'prediction')
+        vs = self._as_tensor(voxel, prediction, meta, -1.)
+        larcv_prediction.set(vs, meta)
 
         for keyword in kwargs:
             values = kwargs[keyword].reshape([-1]).astype(np.float32)
-            larcv_arg = self._fout.get_data(dtype_keyword, keyword)
-            vs = as_tensor(voxel, values, meta, -1.)
+            larcv_arg = self._fout.get_data(self._dtype_keyword, keyword)
+            vs = self._as_tensor(voxel, values, meta, -1.)
             larcv_arg.set(vs, meta)
 
         if len(self._flags.DATA_KEYS) > 1:
             label = self.blob()[self._flags.DATA_KEYS[1]][idx]
             label = label.astype(np.float32).reshape([-1])
-            larcv_label = self._fout.get_data(dtype_keyword,'label')
-            vs = as_tensor(voxel,label,meta,-1.)
-            larcv_label.set(vs,meta)
-        self._fout.set_id(keys[0],keys[1],keys[2])
+            larcv_label = self._fout.get_data(self._dtype_keyword, 'label')
+            vs = self._as_tensor(voxel, label, meta, -1.)
+            larcv_label.set(vs, meta)
+        self._fout.set_id(keys[0], keys[1], keys[2])
         self._fout.save_entry()
 
     def finalize(self):
