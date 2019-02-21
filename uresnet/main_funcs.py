@@ -11,24 +11,24 @@ from uresnet.iotools import io_factory
 from uresnet.trainval import trainval
 import uresnet.utils as utils
 import torch
+import itertools
 
 
 def iotest(flags):
     # IO configuration
     io = io_factory(flags)
-    io.initialize()
+    # io.initialize()
     num_entries = io.num_entries()
     ctr = 0
     data_key = flags.DATA_KEYS[0]
-    while ctr < num_entries:
-        idx,blob=io.next()
-        msg = str(ctr) + '/' + str(num_entries) + ' ... '  + str(idx) + ' ' + str(blob[data_key][0].shape)
+    print(len(io))
+    for idx, blob in enumerate(io):
+        msg = str(ctr) + '/' + str(num_entries) + ' ... '  + str(blob['idx'][0]) + ' ' + str(blob[data_key][0].shape)
         for key in flags.DATA_KEYS:
             if key == data_key: continue
             msg += str(blob[key][0].shape)
         print(msg)
-        ctr += len(data)
-    io.finalize()
+    # io.finalize()
 
 
 class Handlers:
@@ -49,10 +49,7 @@ def train(flags):
 def inference(flags):
     flags.TRAIN = False
     handlers = prepare(flags)
-    if flags.FULL:
-        full_inference_loop(flags, handlers)
-    else:
-        inference_loop(flags, handlers)
+    inference_loop(flags, handlers)
 
 
 def prepare(flags):
@@ -61,13 +58,14 @@ def prepare(flags):
 
     # IO configuration
     handlers.data_io = io_factory(flags)
-    handlers.data_io.initialize()
-    if 'sparse' in flags.IO_TYPE:
-        handlers.data_io.start_threads()
-        # handlers.data_io.next()
     if 'sparse' in flags.MODEL_NAME and 'sparse' not in flags.IO_TYPE:
         sys.stderr.write('Sparse UResNet needs sparse IO.')
         sys.exit(1)
+    handlers.data_io_iter = iter(handlers.data_io)
+    if flags.TRAIN:
+        handlers.data_io_iter = iter(handlers.data_io.cycle())
+    else:
+        handlers.data_io_iter = itertools.cycle(handlers.data_io)
 
     # Trainer configuration
     flags.NUM_CHANNEL = handlers.data_io.num_channels()
@@ -76,9 +74,9 @@ def prepare(flags):
     # Restore weights if necessary
     handlers.iteration = 0
     loaded_iteration = 0
-    if not flags.FULL:
+    if flags.TRAIN:
         loaded_iteration   = handlers.trainer.initialize()
-        if flags.TRAIN: handlers.iteration = loaded_iteration
+        handlers.iteration = loaded_iteration
 
     # Weight save directory
     if flags.WEIGHT_PREFIX:
@@ -91,12 +89,11 @@ def prepare(flags):
         logname = '%s/train_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration)
         if not flags.TRAIN:
             logname = '%s/inference_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration)
-        handlers.csv_logger = utils.CSVData(logname)
-        if not flags.TRAIN and flags.FULL:
             handlers.metrics_logger = utils.CSVData('%s/metrics_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
             handlers.pixels_logger = utils.CSVData('%s/pixels_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
             handlers.michel_logger = utils.CSVData('%s/michel_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
             handlers.michel_logger2 = utils.CSVData('%s/michel2_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
+        handlers.csv_logger = utils.CSVData(logname)
     return handlers
 
 
@@ -109,8 +106,9 @@ def get_keys(flags):
         weight_key = flags.DATA_KEYS[2]
     return data_key, label_key, weight_key
 
-def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
 
+def log(handlers, tstamp_iteration, tspent_iteration, tsum,
+        tspent_io, tspent_sum_io, res, flags, epoch):
     report_step  = flags.REPORT_STEP and ((handlers.iteration+1) % flags.REPORT_STEP == 0)
 
     loss_seg = np.mean(res['loss_seg'])
@@ -123,7 +121,7 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         handlers.csv_logger.record(('iter', 'epoch', 'titer', 'tsumiter'),
                                    (handlers.iteration,epoch,tspent_iteration,tsum))
         handlers.csv_logger.record(('tio', 'tsumio'),
-                                   (handlers.data_io.tspent_io,handlers.data_io.tspent_sum_io))
+                                   (tspent_io, tspent_sum_io))
         handlers.csv_logger.record(('mem', ), (mem, ))
         tmap, tsum_map = handlers.trainer.tspent, handlers.trainer.tspent_sum
         if flags.TRAIN:
@@ -166,9 +164,9 @@ def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
     if weight_key is not None: data_blob['weight'] = []
 
     for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
-        idx, blob = handlers.data_io.next()
+        blob = next(handlers.data_io_iter)
         data_blob['data'].append(blob[data_key])
-        data_blob['idx_v'].append(idx)
+        data_blob['idx_v'].append(blob['idx'])
         if label_key  is not None: data_blob['label' ].append(blob[label_key ])
         if weight_key is not None: data_blob['weight'].append(blob[weight_key])
 
@@ -177,9 +175,7 @@ def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
 
 def train_loop(flags, handlers):
     data_key, label_key, weight_key = get_keys(flags)
-    tsum = 0.
-    # handlers.data_io.next()
-    # handlers.data_io.next()
+    tsum, tspent_sum_io = 0., 0.
     while handlers.iteration < flags.ITERATION:
         epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
@@ -187,8 +183,12 @@ def train_loop(flags, handlers):
 
         checkpt_step = flags.CHECKPOINT_STEP and flags.WEIGHT_PREFIX and ((handlers.iteration+1) % flags.CHECKPOINT_STEP == 0)
 
+        tstart_io = time.time()
         data_blob = get_data_minibatched(handlers, flags, data_key, label_key, weight_key)
+        tspent_io = time.time() - tstart_io
+        tspent_sum_io += tspent_io
 
+        print(data_blob['idx_v'])
         # Train step
         res = handlers.trainer.train_step(data_blob, epoch=float(epoch),
                                           batch_size=flags.BATCH_SIZE)
@@ -198,7 +198,9 @@ def train_loop(flags, handlers):
 
         tspent_iteration = time.time() - tstart_iteration
         tsum += tspent_iteration
-        log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)
+        log(handlers, tstamp_iteration, tspent_iteration, tsum,
+            tspent_io, tspent_sum_io,
+            res, flags, epoch)
 
         # Increment iteration counter
         handlers.iteration += 1
@@ -206,77 +208,24 @@ def train_loop(flags, handlers):
     # Finalize
     if handlers.csv_logger:
         handlers.csv_logger.close()
-    handlers.data_io.finalize()
+    # handlers.data_io.finalize()
 
 
 def inference_loop(flags, handlers):
-    # TODO assumes bs = 1 mbs = 1 so far.
     data_key, label_key, weight_key = get_keys(flags)
-    tsum = 0.
-    handlers.data_io.next()
-    handlers.data_io.next()
-    while handlers.iteration < flags.ITERATION:
-        epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
-        tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
-        tstart_iteration = time.time()
-
-        idx, blob = handlers.data_io.next()
-
-        data_blob = {}
-        data_blob['data'] = [blob[data_key]]
-        if label_key is not None:
-            data_blob['label'] = [blob[label_key]]
-        if weight_key is not None:
-            data_blob['weight'] = [blob[weight_key]]
-
-        # Run inference
-        res = handlers.trainer.forward(data_blob, epoch=float(epoch),
-                                       batch_size=flags.BATCH_SIZE)
-        print('segmentation',
-              np.unique(np.argmax(res['segmentation'][0], axis=0)[(data_blob['data'][0]>0)[0, 0, ...]], return_counts=True),
-              np.unique(np.argmax(res['segmentation'][0], axis=0), return_counts=True))
-        print('label',
-              np.unique(data_blob['label'][0][(data_blob['data'][0]>0)], return_counts=True),
-              np.unique(data_blob['label'][0], return_counts=True))
-        # Store output if requested
-        if flags.OUTPUT_FILE:
-            handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
-
-        tspent_iteration = time.time() - tstart_iteration
-        tsum += tspent_iteration
-        log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch)
-        handlers.iteration += 1
-
-    # Finalize
-    if handlers.csv_logger:
-        handlers.csv_logger.close()
-    handlers.data_io.finalize()
-
-
-def full_inference_loop(flags, handlers):
-    data_key, label_key, weight_key = get_keys(flags)
-    tsum = 0.
+    tsum, tspent_sum_io = 0., 0.
     # Metrics for each event
-    global_metrics = {
-        # 'iteration': [],
-        # 'acc': [],
-        # 'correct_softmax': [],
-        # 'id': [],
-        # 'nonzero_pixels': [],
-        # 'class_acc': [],
-        # 'class_pixel': [],
-        # 'class_mean_softmax': [],
-        # 'cluster_acc': [],
-        # 'class_cluster_acc': []
-    }
+    global_metrics = {}
     weights = glob.glob(flags.MODEL_PATH)
-    print(weights)
-    idx_v, blob_v = [], []
-    if flags.ITERATION <= 300:
-        for i in range(flags.ITERATION):
-            idx, blob = handlers.data_io.next()
-            idx_v.append(idx)
-            blob_v.append(blob)
+    print('Loading : ', weights)
+    if len(weights) == 0:
+        raise Exception('No weights specified.')
+    # idx_v, blob_v = [], []
+    # if flags.ITERATION <= 300:
+    #     for i in range(flags.ITERATION):
+    #         idx, blob = handlers.data_io.next()
+    #         idx_v.append(idx)
+    #         blob_v.append(blob)
 
     for weight in weights:
         handlers.trainer._flags.MODEL_PATH = weight
@@ -286,18 +235,13 @@ def full_inference_loop(flags, handlers):
             tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             tstart_iteration = time.time()
 
-            if flags.ITERATION > 300:
-                idx, blob = handlers.data_io.next()
-            else:
-                idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
+            tstart_io = time.time()
+            blob = next(handlers.data_io_iter)
+            idx = blob['idx']
+            tspent_io = time.time() - tstart_io
+            tspent_sum_io += tspent_io
 
-            # if idx[0] not in [10731.,  3033.,  5677.,  9820., 18088., 13372.,  4342.,  2677.,
-            #                   8788.,  6201.,  7780.,  2474.,  6608.,  4541.,  5453.,  7778.,
-            #                   18523.,  1633., 16910.,   713.,  2925., 19938., 11231.,  6616.,
-            #                   14834., 11040., 19469., 15450., 12583.,  4824.,  8399., 13127.,
-            #                   15828., 12510.,  5336.,  4144., 13622.]:
-            #     handlers.iteration += 1
-            #     continue
+            print(idx)
 
             data_blob = {}
             data_blob['data'] = [blob[data_key]]
@@ -318,8 +262,8 @@ def full_inference_loop(flags, handlers):
             epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
             tspent_iteration = time.time() - tstart_iteration
             tsum += tspent_iteration
-            log(handlers, tstamp_iteration, tspent_iteration, tsum, res,
-                flags, epoch)
+            log(handlers, tstamp_iteration, tspent_iteration, tsum,
+                tspent_io, tspent_sum_io, res, flags, epoch)
             # Log metrics
             if label_key is not None:
                 if flags.MODEL_NAME == 'uresnet_sparse':
@@ -455,4 +399,4 @@ def full_inference_loop(flags, handlers):
         handlers.michel_logger.close()
     if handlers.michel_logger2:
         handlers.michel_logger2.close()
-    handlers.data_io.finalize()
+    # handlers.data_io.finalize()

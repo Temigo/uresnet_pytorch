@@ -16,7 +16,6 @@ class URESNET_FLAGS:
     MODEL_NAME = ""
     TRAIN      = True
     DEBUG      = False
-    FULL = False
 
     # Flags for Sparse UResNet model
     URESNET_NUM_STRIDES = 3
@@ -50,6 +49,7 @@ class URESNET_FLAGS:
     NUM_THREADS = 1
     DATA_DIM = 3
     PARTICLE = False
+    NUM_WORKERS = 1
 
     def __init__(self):
         self._build_parsers()
@@ -103,15 +103,17 @@ class URESNET_FLAGS:
                             help='Compute pixel loss weighting factor on the fly [default: %s' % self.COMPUTE_WEIGHT)
         parser.add_argument('-sd','--seed', default=self.SEED,
                                   help='Seed for random number generators [default: %s]' % self.SEED)
+        parser.add_argument('-nw','--num-workers',type=int,default=self.NUM_WORKERS,
+                            help='Number of workers to read input file [default: %s]' % self.NUM_WORKERS)
         return parser
 
     def _build_parsers(self):
 
-        self.parser = argparse.ArgumentParser(description="Edge-GCNN Configuration Flags")
+        self.parser = argparse.ArgumentParser(description="Network Configuration Flags")
         subparsers = self.parser.add_subparsers(title="Modules", description="Valid subcommands", dest='script', help="aho")
 
         # train parser
-        train_parser = subparsers.add_parser("train", help="Train Edge-GCNN")
+        train_parser = subparsers.add_parser("train", help="Train network")
         train_parser.add_argument('-wp','--weight_prefix', default=self.WEIGHT_PREFIX,
                                   help='Prefix (directory + file prefix) for snapshots of weights [default: %s]' % self.WEIGHT_PREFIX)
         train_parser.add_argument('-lr','--learning_rate', type=float, default=self.LEARNING_RATE,
@@ -120,13 +122,13 @@ class URESNET_FLAGS:
                                   help='Period (in steps) to store snapshot of weights [default: %s]' % self.CHECKPOINT_STEP)
 
         # inference parser
-        inference_parser = subparsers.add_parser("inference",help="Run inference of Edge-GCNN")
-        inference_parser.add_argument('-full', '--full', default=self.FULL, action='store_true',
-                                      help='Full inference mode [default: %s]' % self.FULL)
+        inference_parser = subparsers.add_parser("inference",help="Run inference of network")
         inference_parser.add_argument('-p', '--particle', default=self.PARTICLE, action='store_true',
                                       help='Include particle branch [default: %s]' % self.PARTICLE)
         # IO test parser
-        iotest_parser = subparsers.add_parser("iotest", help="Test iotools for Edge-GCNN")
+        iotest_parser = subparsers.add_parser("iotest", help="Test iotools for network")
+        iotest_parser.add_argument('-p', '--particle', default=self.PARTICLE, action='store_true',
+                                      help='Include particle branch [default: %s]' % self.PARTICLE)
 
         # attach common parsers
         self.train_parser     = self._attach_common_args(train_parser)

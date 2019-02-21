@@ -119,7 +119,7 @@ class UResNet(nn.Module):
         fn_conv, fn_conv_transpose, batch_norm = get_conv(self.is_3d)
         self.base_num_outputs = flags.URESNET_FILTERS
         self.num_strides = flags.URESNET_NUM_STRIDES
-        self.num_inputs = 1  # number of channels of input image
+        self.num_inputs = flags.NUM_CHANNEL # number of channels of input image
         self.image_size = flags.SPATIAL_SIZE
         self.num_classes = flags.NUM_CLASS
 

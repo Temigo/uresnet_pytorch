@@ -44,6 +44,79 @@ class CSVData:
             self._fout.close()
 
 
+def get_particle_info(particle_v):
+    from larcv import larcv
+    num_particles = particle_v.size()
+    part_info = {'particle_idx' : np.arange(0,num_particles),
+                 'primary'      : np.zeros(num_particles,np.int8),
+                 'pdg_code'     : np.zeros(num_particles,np.int32),
+                 'mass'         : np.zeros(num_particles,np.float32),
+                 'creation_x'   : np.zeros(num_particles,np.float32),
+                 'creation_y'   : np.zeros(num_particles,np.float32),
+                 'creation_z'   : np.zeros(num_particles,np.float32),
+                 'direction_x'  : np.zeros(num_particles,np.float32),
+                 'direction_y'  : np.zeros(num_particles,np.float32),
+                 'direction_z'  : np.zeros(num_particles,np.float32),
+                 'start_x'      : np.zeros(num_particles,np.float32),
+                 'start_y'      : np.zeros(num_particles,np.float32),
+                 'start_z'      : np.zeros(num_particles,np.float32),
+                 'end_x'        : np.zeros(num_particles,np.float32),
+                 'end_y'        : np.zeros(num_particles,np.float32),
+                 'end_z'        : np.zeros(num_particles,np.float32),
+                 'creation_energy'   : np.zeros(num_particles,np.float32),
+                 'creation_momentum' : np.zeros(num_particles,np.float32),
+                 'deposited_energy'  : np.zeros(num_particles,np.float32),
+                 'npx'               : np.zeros(num_particles,np.int32),
+                 'creation_process'  : ['']*num_particles,
+                 'category'          : np.zeros(num_particles,np.int8)
+                 }
+
+    for idx in range(num_particles):
+        particle = particle_v[idx]
+        pdg_code = particle.pdg_code()
+        mass     = larcv.ParticleMass(pdg_code)
+        momentum = np.float32(np.sqrt(np.power(particle.px(),2)+
+                                      np.power(particle.py(),2)+
+                                      np.power(particle.pz(),2)))
+
+        part_info[ 'primary'     ][idx] = np.int8(particle.track_id() == particle.parent_track_id())
+        part_info[ 'pdg_code'    ][idx] = np.int32(pdg_code)
+        part_info[ 'mass'        ][idx] = np.float32(mass)
+        part_info[ 'creation_x'  ][idx] = np.float32(particle.x())
+        part_info[ 'creation_y'  ][idx] = np.float32(particle.y())
+        part_info[ 'creation_z'  ][idx] = np.float32(particle.z())
+        part_info[ 'direction_x' ][idx] = np.float32(particle.px()/momentum)
+        part_info[ 'direction_y' ][idx] = np.float32(particle.py()/momentum)
+        part_info[ 'direction_z' ][idx] = np.float32(particle.pz()/momentum)
+        part_info[ 'start_x'     ][idx] = np.float32(particle.first_step().x())
+        part_info[ 'start_y'     ][idx] = np.float32(particle.first_step().y())
+        part_info[ 'start_z'     ][idx] = np.float32(particle.first_step().z())
+        part_info[ 'end_x'       ][idx] = np.float32(particle.last_step().x())
+        part_info[ 'end_y'       ][idx] = np.float32(particle.last_step().y())
+        part_info[ 'end_z'       ][idx] = np.float32(particle.last_step().z())
+        part_info[ 'creation_energy'   ][idx] = np.float32(particle.energy_init() - mass)
+        part_info[ 'creation_momentum' ][idx] = momentum
+        part_info[ 'deposited_energy'  ][idx] = np.float32(particle.energy_deposit())
+        part_info[ 'npx'               ][idx] = np.int32(particle.num_voxels())
+
+        category = -1
+        process  = particle.creation_process()
+        if(pdg_code == 2212 or pdg_code == -2212): category = 0
+        elif not pdg_code in [11,-11,22]: category = 1
+        elif pdg_code == 22: category = 2
+        else:
+            if process in ['primary','nCapture','conv','compt']: category = 2
+            elif process in ['muIoni','hIoni']: category = 3
+            elif process in ['muMinusCaptureAtRest','muPlusCaptureAtRest','Decay']: category = 4
+            else:
+                print('Unidentified process found: PDG=%d creation_process="%s"' % (pdg_code,process))
+                raise ValueError
+
+        part_info[ 'creation_process'  ][idx] = process
+        part_info[ 'category'          ][idx] = category
+    return part_info
+
+
 def store_segmentation(io,idx_vv,softmax_vv):
     res_softmax_v=[]
     for batch,idx_v in enumerate(idx_vv):
