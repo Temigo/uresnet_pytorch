@@ -8,8 +8,6 @@ import sys
 from uresnet.ops import GraphDataParallel
 import uresnet.models as models
 import numpy as np
-import matplotlib
-from matplotlib import pyplot as plt
 
 
 class trainval(object):
@@ -128,6 +126,9 @@ class trainval(object):
         elif self._flags.MODEL_NAME == 'uresnet_dense':
             model = models.DenseUResNet
             self._criterion = models.DenseSegmentationLoss(self._flags).cuda()
+        elif self._flags.MODEL_NAME == 'ppn':
+            model = models.PPN
+            self._criterion = models.PPNSegmentationLoss(self._flags).cuda()
         else:
             raise Exception("Unknown model name provided")
 
@@ -136,7 +137,7 @@ class trainval(object):
 
         self._net = GraphDataParallel(model(self._flags),
                                       device_ids=self._flags.GPUS,
-                                      dense=('sparse' not in self._flags.MODEL_NAME))
+                                      dense=('sparse' not in self._flags.MODEL_NAME and 'ppn' not in self._flags.MODEL_NAME))
 
         if self._flags.TRAIN:
             self._net.train().cuda()
