@@ -104,15 +104,15 @@ class trainval(object):
                     weight = [torch.as_tensor(w).cuda() for w in weight]
                     for w in weight:
                         w.requires_grad = False
-                loss_seg, acc = self._criterion(segmentation, data, label, weight)
+                loss_acc = self._criterion(segmentation, data, label, weight)
                 if self._flags.TRAIN:
-                    self._loss.append(loss_seg)
+                    self._loss.append(loss_acc['loss_seg'])
             res = {
                 'segmentation': [s.cpu().detach().numpy() for s in segmentation],
                 'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation],
-                'accuracy': [acc],
-                'loss_seg': [loss_seg.cpu().item() if not isinstance(loss_seg, float) else loss_seg]
             }
+            for label in loss_acc:
+                res[label] = [loss_acc[label].cpu().item() if not isinstance(loss_acc[label], float) else loss_acc[label]]
             self.tspent['forward'] = time.time() - tstart
             self.tspent_sum['forward'] += self.tspent['forward']
             return res

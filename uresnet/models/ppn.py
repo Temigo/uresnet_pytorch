@@ -131,9 +131,9 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         if weight is not None:
             assert len(data) == len(weight)
         batch_ids = [d[:, -2] for d in data]
-        total_loss = 0
-        total_acc = 0
-        total_count = 0
+        total_loss = 0.
+        total_acc = 0.
+        total_distance, total_class = 0., 0.
         # Loop over ?
         for i in range(len(data)):
             for b in batch_ids[i].unique():
@@ -144,7 +144,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 # print('data', event_data.shape, event_data.type())
                 event_pixel_pred = segmentation[i][batch_index][:, :-2]+anchors  # (N, 3)
                 event_scores = segmentation[i][batch_index][:, -2:]  # (N, 2)
-                event_scores_softmax = self.softmax(event_scores)
+                # event_scores_softmax = self.softmax(event_scores)
                 # print('preds', event_pixel_pred.shape, event_scores.shape)
                 # Ground truth pixels
                 event_label = label[i][label[i][:, -1] == b][:, :-2]  # (N_gt, 3)
@@ -159,11 +159,13 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                     d = self.distances(event_label, event_pixel_pred)
                     d_true = self.distances(event_label, event_data)
                     positives = (d_true < 5).any(dim=0)
-                    loss_seg = self.cross_entropy(event_scores.double(), positives.long())
+                    loss_seg = torch.mean(self.cross_entropy(event_scores.double(), positives.long()))
+                    total_class += loss_seg
                     distances_positives = d[:, positives]
                     if distances_positives.shape[1] > 0:
                         d2, _ = torch.min(distances_positives, dim=0)
                         loss_seg += d2.mean()
+                        total_distance += d2.mean()
 
                     # Accuracy
                     predicted_labels = torch.argmax(event_scores, dim=-1)
@@ -174,8 +176,13 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                     loss_seg = torch.tensor(100.0)
                 # loss_seg = event_pixel_pred.mean()
 
-                total_loss += torch.mean(loss_seg)
-                total_count += 1
+                total_loss += loss_seg
                 total_acc += acc
 
-        return total_loss, total_acc
+        # return total_loss, total_acc
+        return {
+            'accuracy': total_acc,
+            'loss_seg': total_loss,
+            'loss_class': total_class,
+            'loss_distance': total_distance
+        }

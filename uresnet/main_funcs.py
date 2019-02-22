@@ -11,6 +11,7 @@ from uresnet.iotools import io_factory
 from uresnet.trainval import trainval
 import uresnet.utils as utils
 import torch
+import scipy
 
 
 def iotest(flags):
@@ -115,6 +116,9 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
 
     loss_seg = np.mean(res['loss_seg'])
     acc_seg  = np.mean(res['accuracy'])
+    if 'ppn' in flags.MODEL_NAME:
+        loss_distance = np.mean(res['loss_distance'])
+        loss_class = np.mean(res['loss_class'])
 
     mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
 
@@ -134,6 +138,8 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
                                    (tmap['forward'],tmap['save'],tsum_map['forward'],tsum_map['save']))
 
         handlers.csv_logger.record(('loss_seg','acc_seg'),(loss_seg,acc_seg))
+        if 'ppn' in flags.MODEL_NAME:
+            handlers.csv_logger.record(('loss_class', 'loss_distance'), (loss_class, loss_distance))
         handlers.csv_logger.write()
 
     # Report (stdout)
@@ -313,7 +319,30 @@ def full_inference_loop(flags, handlers):
 
             # Store output if requested
             if flags.OUTPUT_FILE:
-                handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
+                if 'ppn' in flags.MODEL_NAME:
+                    gt = data_blob['label'][0][0][:, :-2]
+                    pred = res['segmentation'][0][:, :-2]
+                    scores = scipy.special.softmax(res['segmentation'][0][:, -2:], axis=1)
+                    voxels = blob['voxels'][0][:, :-1]
+                    print(voxels[:10], scores[:10])
+                    real_pred = (voxels + 0.5)+pred
+                    print(real_pred.shape, scores.shape)
+                    csv = utils.CSVData('%s/%s-%05d.csv' % (flags.LOG_DIR, flags.OUTPUT_FILE, handlers.iteration))
+                    for i in range(scores.shape[0]):
+                        csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 0, scores[i, 1]])
+                        csv.write()
+                    real_pred = real_pred[scores[:, 1] > 0.6]
+                    scores = scores[scores[:, 1] > 0.6]
+                    print(real_pred.shape, scores.shape )
+                    for i in range(scores.shape[0]):
+                        csv.record(['x', 'y', 'z', 'type', 'score'], [real_pred[i, 0], real_pred[i, 1], real_pred[i, 2], 1, scores[i, 1]])
+                        csv.write()
+                    for i in range(len(gt)):
+                        csv.record(['x', 'y', 'z', 'type', 'score'], [gt[i, 0], gt[i, 1], gt[i, 2], 2, 0.0])
+                        csv.write()
+                    csv.close()
+                else:
+                    handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
 
             epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
             tspent_iteration = time.time() - tstart_iteration
@@ -321,24 +350,24 @@ def full_inference_loop(flags, handlers):
             log(handlers, tstamp_iteration, tspent_iteration, tsum, res,
                 flags, epoch)
             # Log metrics
-            if label_key is not None:
-                if flags.MODEL_NAME == 'uresnet_sparse':
-                    metrics, dbscans = utils.compute_metrics_sparse(blob[data_key],
-                                                                    blob[label_key],
-                                                                    res['softmax'],
-                                                                    idx,
-                                                                    N=flags.SPATIAL_SIZE,
-                                                                    particles=blob['particles'] if flags.PARTICLE else None)
-                else:
-                    metrics = utils.compute_metrics_dense(blob[data_key], blob[label_key], res['softmax'], idx)
-                metrics['id'] = idx
-                # metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
-                metrics['iteration'] = [loaded_iteration] * len(metrics['acc'])
-                for key in metrics:
-                    if key in global_metrics:
-                        global_metrics[key].extend(metrics[key])
-                    else:
-                        global_metrics[key] = list(metrics[key])
+            # if label_key is not None:
+            #     if flags.MODEL_NAME == 'uresnet_sparse':
+            #         metrics, dbscans = utils.compute_metrics_sparse(blob[data_key],
+            #                                                         blob[label_key],
+            #                                                         res['softmax'],
+            #                                                         idx,
+            #                                                         N=flags.SPATIAL_SIZE,
+            #                                                         particles=blob['particles'] if flags.PARTICLE else None)
+            #     elif flags.MODEL_NAME == 'uresnet_sparse':
+            #         metrics = utils.compute_metrics_dense(blob[data_key], blob[label_key], res['softmax'], idx)
+            #     metrics['id'] = idx
+            #     # metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
+            #     metrics['iteration'] = [loaded_iteration] * len(metrics['acc'])
+            #     for key in metrics:
+            #         if key in global_metrics:
+            #             global_metrics[key].extend(metrics[key])
+            #         else:
+            #             global_metrics[key] = list(metrics[key])
                 #ninety_quantile = utils.quantiles(blob[label_key], res['softmax'])
 
             # Store output if requested
