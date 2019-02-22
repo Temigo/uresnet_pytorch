@@ -55,8 +55,8 @@ class PPN(torch.nn.Module):
             scn.SubmanifoldConvolution(dimension, total_filters, total_filters, 3, False)
         )
 
-        self.ppn1_pixel_pred = scn.SubmanifoldConvolution(dimension, total_filters, dimension, 3, False)
-        self.ppn1_scores = scn.SubmanifoldConvolution(dimension, total_filters, 2, 3, False)
+        self.ppn1_pixel_pred = scn.SubmanifoldConvolution(dimension, total_filters, dimension, 1, False)
+        self.ppn1_scores = scn.SubmanifoldConvolution(dimension, total_filters, 2, 1, False)
         # self.softmax = torch.nn.Softmax(dim=1)
 
     def expand_feature_map(self, x, coords, i):
@@ -112,6 +112,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         super(SegmentationLoss, self).__init__(reduction=reduction)
         self._flags = flags
         self.cross_entropy = torch.nn.CrossEntropyLoss(reduction='none')
+        self.softmax = torch.nn.Softmax(dim=1)
 
     def distances(self, v1, v2):
         v1_2 = v1.unsqueeze(1).expand(v1.size(0), v2.size(0), v1.size(1)).double()
@@ -139,12 +140,17 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 batch_index = batch_ids[i] == b
                 # event_segmentation = segmentation[i][batch_index]
                 event_data = data[i][batch_index][:, :-2]  # (N, 3)
+                anchors = (event_data + 0.5).float()
                 # print('data', event_data.shape, event_data.type())
-                event_pixel_pred = segmentation[i][batch_index][:, :-2]  # (N, 3)
+                event_pixel_pred = segmentation[i][batch_index][:, :-2]+anchors  # (N, 3)
                 event_scores = segmentation[i][batch_index][:, -2:]  # (N, 2)
+                event_scores_softmax = self.softmax(event_scores)
                 # print('preds', event_pixel_pred.shape, event_scores.shape)
                 # Ground truth pixels
                 event_label = label[i][label[i][:, -1] == b][:, :-2]  # (N_gt, 3)
+                # print('label', event_label)
+                # print('pred', event_pixel_pred[event_scores_softmax[:, 1]>0.9])
+                # print('scores', event_scores_softmax[event_scores_softmax[:, 1]>0.9])
                 # print('label', event_label.shape)
                 # class loss
                 # distance loss
