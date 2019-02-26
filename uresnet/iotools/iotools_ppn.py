@@ -140,7 +140,11 @@ def threadio_func(io_handle, thread_id):
                 #     blob[key][new_id].append(io_handle.blob()[key][idx])
                 blob[io_handle._flags.DATA_KEYS[0]][new_id].append(io_handle.blob()[io_handle._flags.DATA_KEYS[0]][idx])
                 particles = io_handle.blob()[io_handle._flags.DATA_KEYS[1]][idx]
-                blob[io_handle._flags.DATA_KEYS[1]][new_id].append(np.pad(particles, [(0, 0), (0, 1)], 'constant', constant_values=data_id))
+                if len(particles) > 0:
+                    blob[io_handle._flags.DATA_KEYS[1]][new_id].append(np.pad(particles, [(0, 0), (0, 1)], 'constant', constant_values=data_id))
+                else:
+                    print("EMPTY PARTICLES", idx)
+                    blob[io_handle._flags.DATA_KEYS[1]][new_id].append(np.empty((0, 5)))
                 # if len(io_handle._label):
                 #     label_v.append(io_handle._label[idx])
             blob['voxels']  = [np.vstack(voxel_v[i]) for i in range(num_gpus)]
