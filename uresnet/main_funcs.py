@@ -120,7 +120,7 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     if len(flags.GPUS) > 0:
         mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
     else:
-        mem = map(int, os.popen('free -t -m').readlines()[-1].split()[1:])[1]
+        mem = utils.round_decimals(map(int, os.popen('free -t -b').readlines()[-1].split()[1:])[1]/1.e9, 3)
 
     # Report (logger)
     if handlers.csv_logger:
