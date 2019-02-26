@@ -90,7 +90,7 @@ def threadio_func(io_handle, thread_id):
         - label = [(N, 1)] * batch size
     where N = total number of points across minibatch_size events
     """
-    num_gpus = len(io_handle._flags.GPUS)
+    num_gpus = max(1, len(io_handle._flags.GPUS))
     batch_per_step = io_handle.batch_per_step()
     batch_per_gpu = io_handle.batch_per_gpu()
     while 1:

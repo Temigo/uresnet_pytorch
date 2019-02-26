@@ -8,13 +8,13 @@ class io_base(object):
 
     def __init__(self, flags):
 
-        if not flags.BATCH_SIZE % (flags.MINIBATCH_SIZE * len(flags.GPUS)) == 0:
+        if not flags.BATCH_SIZE % (flags.MINIBATCH_SIZE * max(1, len(flags.GPUS))) == 0:
             msg = 'BATCH_SIZE (%d) must be divisible by GPU count (%d) times MINIBATCH_SIZE(%d)'
             msg = msg % (flags.BATCH_SIZE, len(flags.GPUS), flags.MINIBATCH_SIZE)
             print(msg)
             raise ValueError
-        
-        self._minibatch_per_step = flags.MINIBATCH_SIZE * len(flags.GPUS)
+
+        self._minibatch_per_step = flags.MINIBATCH_SIZE * max(1, len(flags.GPUS))
         self._minibatch_per_gpu  = flags.MINIBATCH_SIZE
         self._num_entries  = -1
         self._num_channels = -1
@@ -22,7 +22,7 @@ class io_base(object):
         self._blob = {}
         self.tspent_io = 0
         self.tspent_sum_io = 0
-        
+
     def blob(self):
         return self._blob
 
@@ -56,10 +56,10 @@ class io_base(object):
         self.tspent_io = time.time() - tstart
         self.tspent_sum_io += self.tspent_io
         return res
-    
+
     def _next(self,buffer_id=-1,release=True):
         raise NotImplementedError
-    
+
     def store_segment(self, idx, data, softmax):
         raise NotImplementedError
 

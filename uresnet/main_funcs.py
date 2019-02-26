@@ -56,7 +56,8 @@ def inference(flags):
 
 
 def prepare(flags):
-    torch.cuda.set_device(flags.GPUS[0])
+    if len(flags.GPUS) > 0:
+        torch.cuda.set_device(flags.GPUS[0])
     handlers = Handlers()
 
     # IO configuration
@@ -116,7 +117,10 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     loss_seg = np.mean(res['loss_seg'])
     acc_seg  = np.mean(res['accuracy'])
 
-    mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
+    if len(flags.GPUS) > 0:
+        mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
+    else:
+        mem = map(int, os.popen('free -t -m').readlines()[-1].split()[1:])[1]
 
     # Report (logger)
     if handlers.csv_logger:
@@ -165,7 +169,7 @@ def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
     if label_key  is not None: data_blob['label' ] = []
     if weight_key is not None: data_blob['weight'] = []
 
-    for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
+    for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * max(1, len(flags.GPUS))))):
         idx, blob = handlers.data_io.next()
         data_blob['data'].append(blob[data_key])
         data_blob['idx_v'].append(idx)
