@@ -2,10 +2,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import torch
-from uresnet.models.extract_feature_map import ExtractFeatureMap, Selection, SelectionFeatures
+from uresnet.models.extract_feature_map import Selection, Multiply
 
 
-class PPN2(torch.nn.Module):
+class PPN(torch.nn.Module):
     def __init__(self, flags):
         import sparseconvnet as scn
         super(PPN, self).__init__()
@@ -33,79 +33,91 @@ class PPN2(torch.nn.Module):
                     .add(scn.SubmanifoldConvolution(dimension, b, b, 3, False)))
              ).add(scn.AddTable())
 
-        def U(nPlanes): #Recursive function
-            m = scn.Sequential()
-            if len(nPlanes) == 1:
-                for _ in range(reps):
-                    block(m, nPlanes[0], nPlanes[0])
-            else:
-                m = scn.Sequential()
-                for _ in range(reps):
-                    block(m, nPlanes[0], nPlanes[0])
-                m.add(
-                    scn.ConcatTable().add(
-                        scn.Identity()).add(
-                        scn.Sequential().add(
-                            scn.BatchNormReLU(nPlanes[0])).add(
-                            scn.Convolution(dimension, nPlanes[0], nPlanes[1],
-                                downsample[0], downsample[1], False)).add(
-                            U(nPlanes[1:])).add(
-                            scn.SubmanifoldConvolution(dimension, nPlanes[1], 2, 1, False)).add(
-                            Selection(dimension, flags.SPATIAL_SIZE/(2**(len(nPlanes)-1)))).add(
-                            scn.UnPooling(dimension, downsample[0], downsample[1]))))
-                m.add(SelectionFeatures(dimension, flags.SPATIAL_SIZE/(2**(len(nPlanes)-1))))
-                # m.add(scn.JoinTable())
-            return m
+        # def U(nPlanes): #Recursive function
+        #     m = scn.Sequential()
+        #     if len(nPlanes) == 1:
+        #         for _ in range(reps):
+        #             block(m, nPlanes[0], nPlanes[0])
+        #     else:
+        #         m = scn.Sequential()
+        #         for _ in range(reps):
+        #             block(m, nPlanes[0], nPlanes[0])
+        #         m.add(
+        #             scn.ConcatTable().add(
+        #                 scn.Identity()).add(
+        #                 scn.Sequential().add(
+        #                     scn.BatchNormReLU(nPlanes[0])).add(
+        #                     scn.Convolution(dimension, nPlanes[0], nPlanes[1],
+        #                         downsample[0], downsample[1], False)).add(
+        #                     U(nPlanes[1:])).add(
+        #                     scn.SubmanifoldConvolution(dimension, nPlanes[1], 2, 1, False)).add(
+        #                     Selection(dimension, flags.SPATIAL_SIZE/(2**(len(nPlanes)-1)))).add(
+        #                     scn.UnPooling(dimension, downsample[0], downsample[1]))))
+        #         m.add(SelectionFeatures(dimension, flags.SPATIAL_SIZE/(2**(len(nPlanes)-1))))
+        #         # m.add(scn.JoinTable())
+        #     return m
 
-        self.conv = scn.SubmanifoldConvolution(dimension, nInputFeatures, m, 3, False)
-        self.u = U(nPlanes)
-        print(self.u)
-        self.layers = scn.Sequential().add(scn.SubmanifoldConvolution(dimension, nInputFeatures, m, 3, False))
+        # self.conv = scn.SubmanifoldConvolution(dimension, nInputFeatures, m, 3, False)
+        # self.u = U(nPlanes)
+        # print(self.u)
+        self.layers = scn.Sequential()#.add(scn.SubmanifoldConvolution(dimension, nInputFeatures, m, 3, False))
         for i in range(len(nPlanes)-1):
-            # module = scn.Sequential()
+            module = scn.Sequential()
             for _ in range(reps):
-                block(self.layers, nPlanes[i], nPlanes[i])
-            self.layers.add(scn.Sequential().add(
+                block(module, nPlanes[i], nPlanes[i])
+            module.add(scn.Sequential().add(
                     scn.BatchNormLeakyReLU(nPlanes[i], leakiness=leakiness)).add(
                     scn.Convolution(dimension, nPlanes[i], nPlanes[i+1],
                         downsample[0], downsample[1], False))
                     )
             # self.layers.append(module)
-            # self.layers.add(module)
-        self.layers.add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 3, False))
-        self.layers.add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], 2, 1, False))
-        self.layers.add(Selection(dimension, flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1))))
-        self.layers.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
-
+            self.layers.add(module)
+        # self.layers.add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 3, False))
+        # self.layers.add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], 2, 1, False))
+        # self.layers.add(Selection(dimension, flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1))))
+        # self.layers.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
 
         self.input_layer = scn.Sequential().add(
-           # scn.InputLayer(dimension, flags.SPATIAL_SIZE, mode=3)).add(
+           scn.InputLayer(dimension, flags.SPATIAL_SIZE, mode=3)).add(
            scn.SubmanifoldConvolution(dimension, nInputFeatures, m, 3, False))
         # Sum of nPlanes values
         self.half_stride = int(flags.URESNET_NUM_STRIDES/2)
         print(self.half_stride, flags.SPATIAL_SIZE/(2**flags.URESNET_NUM_STRIDES), flags.SPATIAL_SIZE/(2**self.half_stride))
         total_filters = int(m * flags.URESNET_NUM_STRIDES * (flags.URESNET_NUM_STRIDES + 1) / 2)
-        self.ppn1_conv = scn.Sequential().add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 3, False))
+        self.ppn1_conv = scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 3, False)
         # self.ppn1_conv.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
-        self.ppn1_pixel_pred = scn.Sequential().add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], dimension, 1, False))
+        # self.ppn1_pixel_pred = scn.Sequential().add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], dimension, 1, False))
         self.ppn1_scores = scn.SubmanifoldConvolution(dimension, nPlanes[-1], 2, 1, False)
         # self.ppn1_unpool = scn.Sequential()#.add(scn.InputLayer(dimension, flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1)), mode=3)).add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 1, False))
+        self.selection1 = Selection()
+        self.selection2 = Selection()
+        self.unpool1 = scn.Sequential()
+        for i in range(flags.URESNET_NUM_STRIDES-self.half_stride-1):
+            self.unpool1.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
+
+        self.unpool2 = scn.Sequential()
+        for i in range(self.half_stride):
+            self.unpool2.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
 
         # for i in range(flags.URESNET_NUM_STRIDES-half_stride-2):
         #     self.ppn1_unpool.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
         # print(self.ppn1_unpool)
-        self.extract = ExtractFeatureMap(self._flags.URESNET_NUM_STRIDES-self.half_stride-1, dimension, flags.SPATIAL_SIZE/(2**self.half_stride))
-
-
+        # self.extract = ExtractFeatureMap(self._flags.URESNET_NUM_STRIDES-self.half_stride-1, dimension, flags.SPATIAL_SIZE/(2**self.half_stride))
         middle_filters = int(m * self.half_stride * (self.half_stride + 1) / 2)
         print('middle filters', middle_filters)
-        self.ppn2_conv = scn.Sequential().add(scn.InputLayer(dimension, flags.SPATIAL_SIZE/(2**self.half_stride), mode=3)).add(scn.SubmanifoldConvolution(dimension, middle_filters, middle_filters, 3, False))
+        self.ppn2_conv = scn.SubmanifoldConvolution(dimension, middle_filters, middle_filters, 3, False)
         self.ppn2_pixel_pred = scn.SubmanifoldConvolution(dimension, middle_filters, dimension, 1, False)
         self.ppn2_scores = scn.SubmanifoldConvolution(dimension, middle_filters, 2, 1, False)
         # self.ppn1_pixel_pred = torch.nn.Linear(total_filters, dimension)
         # self.ppn1_scores = torch.nn.Linear(total_filters, 2)
-        self.new_tensor = scn.InputBatch(self._flags.DATA_DIM,  flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1)))
-        self.input_tensor = scn.InputBatch(self._flags.DATA_DIM, self._flags.SPATIAL_SIZE)
+        # self.new_tensor = scn.InputBatch(self._flags.DATA_DIM,  flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1)))
+        # self.input_tensor = scn.InputBatch(self._flags.DATA_DIM, self._flags.SPATIAL_SIZE)
+        self.multiply1 = Multiply()
+        self.multiply2 = Multiply()
+
+        self.ppn3_conv = scn.SubmanifoldConvolution(dimension, nPlanes[0], nPlanes[0], 3, False)
+        self.ppn3_pixel_pred = scn.SubmanifoldConvolution(dimension, nPlanes[0], dimension, 1, False)
+        self.ppn3_scores = scn.SubmanifoldConvolution(dimension, nPlanes[0], 2, 1, False)
 
     def forward(self, point_cloud):
         """
@@ -114,73 +126,51 @@ class PPN2(torch.nn.Module):
         shape of point_cloud[0] = (N, 4)
         """
         # import sparseconvnet as scn
-        # coords = point_cloud[:, 0:-1].float()
-        # features = point_cloud[:, -1][:, None].float()
-        print('point cloud', point_cloud)
-
-        # x = self.input_layer((coords, features))
-        x = point_cloud
-        print(dir(x.metadata))
-        print(self.u(self.conv(x)))
-
+        coords = point_cloud[:, 0:-1].float()
+        features = point_cloud[:, -1][:, None].float()
+        x = self.input_layer((coords, features))
         feature_maps = [x]
         for i, layer in enumerate(self.layers):
             x = layer(x)
-            print(i, layer, x.get_spatial_locations().shape, x.spatial_size)
             feature_maps.append(x)
-
-        print('Metadata', x.metadata)
-        print(dir(x.metadata))
 
         # PPN1 conv and 1x1 predictions
         x = self.ppn1_conv(x)
-        print(x.get_spatial_locations().shape, x.features.shape, x.spatial_size)
-        # print(x[0])
-        ppn1_pixel_pred = self.ppn1_pixel_pred(x)
         ppn1_scores = self.ppn1_scores(x)
-        print(ppn1_pixel_pred.spatial_size)
-
-        # Select among PPN1 predictions
-        anchors = (ppn1_pixel_pred.get_spatial_locations()+0.5).cuda().float()
-        pixel_pred = ppn1_pixel_pred.features + anchors[:, :-1]
-        print(pixel_pred.shape, anchors.shape)
-        pixel_pred = torch.cat([pixel_pred, anchors[:, -1][:, None]], dim=1)
-        index_select = ppn1_scores.features[:, 1] > 0.0
-        scores = ppn1_scores.features[index_select]
-        pixel_pred = pixel_pred[index_select].long() # FIXME round coordinates?
-        pixel_pred = torch.clamp(pixel_pred, 0, ppn1_pixel_pred.spatial_size[0]-1)
-        print('ppn1 pixel pred', pixel_pred.shape)
-
-        # Unpool
-
-        # print(self.new_tensor)
-        print(pixel_pred.min(), pixel_pred.max(), pixel_pred.shape, x.features[index_select].shape)
-
-        # x.metadata.setInputSpatialLocations(x.features, pixel_pred, x.features, False)
-
-        self.new_tensor.set_locations(pixel_pred.cpu(), x.features[index_select].cpu(), overwrite=True)
-
-        # print('new tensor', self.new_tensor)
-        # y = self.expand_feature_map(self.new_tensor, feature_maps[self.half_stride].get_spatial_locations().cuda().float(), self._flags.URESNET_NUM_STRIDES-self.half_stride-1)
-        y = self.extract(self.new_tensor, feature_maps[self.half_stride])
-        # print(pixel_pred.long())
-        # middle = self.ppn1_unpool((pixel_pred.long(), x.features))
-        # middle = self.ppn1_unpool((x.get_spatial_locations(), x.features))
-        # middle = self.ppn1_unpool(self.new_tensor)
-        # print(middle, middle.get_spatial_locations())
+        mask = self.selection1(ppn1_scores)
+        attention = self.unpool1(mask)
 
         # PPN2 conv and 1x1 predictions
+        y = feature_maps[self.half_stride]
+        y = self.multiply1(y, attention)
         y = self.ppn2_conv(y)
-        ppn2_pixel_pred = self.ppn2_pixel_pred(y)
+        # ppn2_pixel_pred = self.ppn2_pixel_pred(y)
         ppn2_scores = self.ppn2_scores(y)
-        print(ppn2_pixel_pred.size(), ppn2_scores.size())
+        mask2 = self.selection2(ppn2_scores)
+        attention2 = self.unpool2(mask2)
+
+        z = feature_maps[0]
+        z = self.multiply2(z, attention2)
+        # print('after multiply', z)
+        z = self.ppn3_conv(z)
+        ppn3_pixel_pred = self.ppn3_pixel_pred(z)
+        ppn3_scores = self.ppn3_scores(z)
 
         # Select among PPN2 predictions
+        # print(ppn2_pixel_pred.spatial_size, 2**self.half_stride)
+        # positions = ppn2_pixel_pred.get_spatial_locations().cuda().float()
+        # pixel_pred = (ppn2_pixel_pred.features + positions[:, :-1]) * (2**self.half_stride)
+        pixel_pred = ppn3_pixel_pred.features
+        scores = ppn3_scores.features
+        # print(pixel_pred.shape, scores.shape)
+        # Add batch id
+        # return [torch.cat([pixel_pred, positions[:, -1][:, None], scores], dim=1)]
+        return [torch.cat([pixel_pred, scores], dim=1),
+                torch.cat([ppn1_scores.get_spatial_locations().cuda().float(), ppn1_scores.features], dim=1),
+                torch.cat([ppn2_scores.get_spatial_locations().cuda().float(), ppn2_scores.features], dim=1)]
 
-        return [torch.cat([pixel_pred, scores], dim=1)]
 
-
-class PPN(torch.nn.Module):
+class PPN_FCN(torch.nn.Module):
     def __init__(self, flags):
         import sparseconvnet as scn
         super(PPN, self).__init__()
@@ -319,7 +309,7 @@ class PPN_old(torch.nn.Module):
         return [torch.cat([pixel_pred, scores], dim=1)]
 
 
-class SegmentationLoss(torch.nn.modules.loss._Loss):
+class SegmentationLoss0(torch.nn.modules.loss._Loss):
     def __init__(self, flags, reduction='sum'):
         super(SegmentationLoss, self).__init__(reduction=reduction)
         self._flags = flags
@@ -351,11 +341,11 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
             for b in batch_ids[i].unique():
                 batch_index = batch_ids[i] == b
                 # event_segmentation = segmentation[i][batch_index]
-                event_data = data[i][batch_index][:, :-2]  # (N, 3)
-                anchors = (event_data + 0.5).float()
+                event_data = data[i][batch_ids[i] == b][:, :-2]  # (N, 3)
                 # print('data', event_data.shape, event_data.type())
-                event_pixel_pred = segmentation[i][batch_index][:, :-2]+anchors  # (N, 3)
-                event_scores = segmentation[i][batch_index][:, -2:]  # (N, 2)
+                print(segmentation[i][:, -1].type(), b.type())
+                event_pixel_pred = segmentation[i][segmentation[i][:, -1] == b.float()][:, :-3] # (N, 3)
+                event_scores = segmentation[i][segmentation[i][:, -1] == b.float()][:, -2:]  # (N, 2)
                 # event_scores_softmax = self.softmax(event_scores)
                 # print('preds', event_pixel_pred.shape, event_scores.shape)
                 # Ground truth pixels
@@ -397,4 +387,98 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
             'loss_seg': total_loss,
             'loss_class': total_class,
             'loss_distance': total_distance
+        }
+
+
+
+class SegmentationLoss(torch.nn.modules.loss._Loss):
+    def __init__(self, flags, reduction='sum'):
+        super(SegmentationLoss, self).__init__(reduction=reduction)
+        self._flags = flags
+        self.cross_entropy = torch.nn.CrossEntropyLoss(reduction='none')
+        self.softmax = torch.nn.Softmax(dim=1)
+
+    def distances(self, v1, v2):
+        v1_2 = v1.unsqueeze(1).expand(v1.size(0), v2.size(0), v1.size(1)).double()
+        v2_2 = v2.unsqueeze(0).expand(v1.size(0), v2.size(0), v1.size(1)).double()
+        return torch.sqrt(torch.pow(v2_2 - v1_2, 2).sum(2))
+
+    def forward(self, segmentation, data, label, weight):
+        """
+        segmentation[0], label and weight are lists of size #gpus = batch_size.
+        segmentation has only 1 element because UResNet returns only 1 element.
+        label[0] has shape (N, 1) where N is #pts across minibatch_size events.
+        weight can be None.
+        """
+        assert len(segmentation[0]) == len(data)
+        assert len(data) == len(label)
+        if weight is not None:
+            assert len(data) == len(weight)
+        batch_ids = [d[:, -2] for d in data]
+        total_loss = 0.
+        total_acc = 0.
+        total_distance, total_class = 0., 0.
+        total_loss_ppn1, total_loss_ppn2 = 0., 0.
+        # Loop over ?
+        for i in range(len(data)):
+            for b in batch_ids[i].unique():
+                batch_index = batch_ids[i] == b
+                # event_segmentation = segmentation[i][batch_index]
+                event_data = data[i][batch_index][:, :-2]  # (N, 3)
+                event_ppn1_data = segmentation[1][i][segmentation[1][i][:, -3] == b.float()][:, :-3]
+                event_ppn2_data = segmentation[2][i][segmentation[2][i][:, -3] == b.float()][:, :-3]
+                anchors = (event_data + 0.5).float()
+                # print('data', event_data.shape, event_data.type())
+                event_pixel_pred = segmentation[0][i][batch_index][:, :-2] + anchors # (N, 3)
+                event_scores = segmentation[0][i][batch_index][:, -2:]  # (N, 2)
+                event_ppn1_scores = segmentation[1][i][segmentation[1][i][:, -3] == b.float()][:, -2:]
+                event_ppn2_scores = segmentation[2][i][segmentation[2][i][:, -3] == b.float()][:, -2:]
+                # event_scores_softmax = self.softmax(event_scores)
+                # print('preds', event_pixel_pred.shape, event_scores.shape)
+                # Ground truth pixels
+                event_label = label[i][label[i][:, -1] == b][:, :-2]  # (N_gt, 3)
+                # print('label', event_label)
+                # print('pred', event_pixel_pred[event_scores_softmax[:, 1]>0.9])
+                # print('scores', event_scores_softmax[event_scores_softmax[:, 1]>0.9])
+                # print('label', event_label.shape)
+                # class loss
+                # distance loss
+                acc = 0.0
+                d = self.distances(event_label, event_pixel_pred)
+                d_true = self.distances(event_label, event_data)
+                positives = (d_true < 5).any(dim=0)
+                loss_seg = torch.mean(self.cross_entropy(event_scores.double(), positives.long()))
+                total_class += loss_seg
+                distances_positives = d[:, positives]
+                if distances_positives.shape[1] > 0:
+                    d2, _ = torch.min(distances_positives, dim=0)
+                    loss_seg += d2.mean()
+                    total_distance += d2.mean()
+
+                # Accuracy
+                predicted_labels = torch.argmax(event_scores, dim=-1)
+                acc = (predicted_labels == positives.long()).sum().item() / float(predicted_labels.nelement())
+
+                # Loss ppn1
+                d_true_ppn1 = self.distances(event_label/(2**(self._flags.URESNET_NUM_STRIDES-1)), event_ppn1_data)
+                d_true_ppn2 = self.distances(event_label/(2**(int(self._flags.URESNET_NUM_STRIDES/2))), event_ppn2_data)
+                positives_ppn1 = (d_true_ppn1 < 1).any(dim=0)
+                positives_ppn2 = (d_true_ppn2 < 1).any(dim=0)
+                loss_seg_ppn1 = torch.mean(self.cross_entropy(event_ppn1_scores.double(), positives_ppn1.long()))
+                loss_seg_ppn2 = torch.mean(self.cross_entropy(event_ppn2_scores.double(), positives_ppn2.long()))
+
+                # loss_seg = event_pixel_pred.mean()
+                total_loss += loss_seg + loss_seg_ppn1 + loss_seg_ppn2
+                total_acc += acc
+                total_loss_ppn1 += loss_seg_ppn1
+                total_loss_ppn2 += loss_seg_ppn2
+
+        # return total_loss, total_acc
+        return {
+            'accuracy': total_acc,
+            'loss_seg': total_loss,
+            'loss_class': total_class,
+            'loss_distance': total_distance,
+            'loss_ppn1': total_loss_ppn1,
+            'loss_ppn2': total_loss_ppn2
         }

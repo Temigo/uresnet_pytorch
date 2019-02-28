@@ -16,61 +16,38 @@ class SelectionFeatures(torch.nn.Module):
         return input
 
 
-class Selection(torch.nn.Module):
-    def __init__(self, dimension, spatial_size):
+class Multiply(torch.nn.Module):
+    def __init__(self):
+        super(Multiply, self).__init__()
 
+    def forward(self, x, y):
+        output = scn.SparseConvNetTensor()
+        output.metadata = x.metadata
+        output.spatial_size = x.spatial_size
+        output.features = x.features.new().resize_(1).expand_as(x.features).fill_(0.0)
+        output.features = x.features * y.features[:, 1][:, None]
+        return output
+
+    def input_spatial_size(self, out_size):
+        return out_size
+
+
+class Selection(torch.nn.Module):
+    def __init__(self, threshold=0.1):
         super(Selection, self).__init__()
-        # self.input_layer = scn.InputLayer(dimension, spatial_size, mode=3)
-        self.dimension = dimension
-        self.spatial_size = spatial_size
+        self.threshold = threshold
+        self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(self, scores):
-        import sparseconvnet as scn
-        # # FIXME add softmax
-        # index = scores.features[:, 0] > 0.5
-        # print(index.shape, (scores.features[:, 0] != 0.0).long().sum())
-        # # output = scn.InputBatch(self.dimension, self.spatial_size)
-        # # return self.input_layer((scores.get_spatial_locations()[index], scores.features[index]))
-        # # output.set_locations(scores.get_spatial_locations()[index], scores.features[index], True)
-        # # scores.metadata.setInputSpatialLocations(
-        # #     scores.features, scores.get_spatial_locations()[index].contiguous(), scores.features[index].contiguous(), True
-        # # )
-        # print(scores.features[index].shape)
-        # # scores.features.index_fill(0, torch.where(index), 0.0)
-        # print(index[:20])
-        # print(scores.features[index][:, 0][:20])
-        # scores.features[index][:, 0].fill_(0.0)
-        # scores.features[index][:, 1].fill_(0.0)
-        # print(scores.features[index][:, 0][:20])
-        # print('selection', scores.features.shape,  (scores.features[:, 0] != 0.0).long().sum())
-        # return scores
         output = scn.SparseConvNetTensor()
-        i = scores.features
-        # print(i)
-        index = i[:, 1] > 0.5
-        index_values = i[index]
-        # m = i.new().resize_(1).expand_as(i[index]).fill_(0.0)
-        # print(m.shape, m.sum())
-        # m = index_values
-        # output.features = m
-        # print(m.shape, m.sum())
-        # m = i.new_tensor(index_values)
-        m = torch.rand_like(index_values).float()
-        output.features = i.new().resize_(1)
-        print(i.shape, m.shape)
-        # output.metadata = scores.metadata
-        output.metadata = scn.Metadata(self.dimension)
-        output.metadata.setInputSpatialSize(scn.toLongTensor(self.dimension, self.spatial_size))
-        # print(scores.get_spatial_locations()[index].contiguous())
-
-        i2 = scores.get_spatial_locations()
-        # locations = i2.new_tensor(i2[index])
-        locations = torch.randint(high=128, size=i2[index].size()).long()
-        print(i2.shape, locations.shape)
-        output.metadata.setInputSpatialLocations(output.features, locations.contiguous(), m.contiguous(), True)
+        output.metadata = scores.metadata
         output.spatial_size = scores.spatial_size
-        print(output.features)
+        output.features = scores.features.new().resize_(1).expand_as(scores.features).fill_(1.0)
+        output.features = output.features * (self.softmax(scores.features)[:, 1] > self.threshold).float()[:, None]
         return output
+
+    def input_spatial_size(self, out_size):
+        return out_size
 
 
 class ExtractFeatureMap(torch.nn.Module):

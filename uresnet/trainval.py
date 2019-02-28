@@ -108,8 +108,8 @@ class trainval(object):
                 if self._flags.TRAIN:
                     self._loss.append(loss_acc['loss_seg'])
             res = {
-                'segmentation': [s.cpu().detach().numpy() for s in segmentation],
-                'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation],
+                'segmentation': [s.cpu().detach().numpy() for s in segmentation[0]],
+                'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation[0]],
             }
             for label in loss_acc:
                 res[label] = [loss_acc[label].cpu().item() if not isinstance(loss_acc[label], float) else loss_acc[label]]

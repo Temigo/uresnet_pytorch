@@ -57,12 +57,13 @@ class Example(torch.nn.Module):
             selection = Selection2(3, 32)
 
         self.model = scn.Sequential().add(
-            scn.Convolution(3, 1, 2, 2, 2, False)).add(
-            selection).add(
-            scn.UnPooling(3, 2, 2))
+            scn.Sequential().add(scn.Convolution(3, 1, 2, 2, 2, False))).add(
+            selection)#.add(
+            #scn.Sequential().add(scn.UnPooling(3, 2, 2)))
+        self.unpool = scn.UnPooling(3, 2, 2)
 
     def forward(self, input):
-        return self.model(input)
+        return self.unpool(self.model(input))
 
 
 if __name__=='__main__':

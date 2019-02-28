@@ -49,12 +49,16 @@ class GraphDataParallel(torch.nn.parallel.DataParallel):
     def gather(self, outputs, output_device):
         """
         len(outputs) = number of gpus
-        len(outputs[0]) = minibatch size
+        len(outputs[0]) = minibatch size for dense
         Returns a tuple of length the number of objects returned by network
         Length of tuple[0] = number of gpus
         """
         results = []
+        num_outputs = len(outputs[0])
+        for i in range(num_outputs):
+            results.append([])
         for output in outputs:  # Iterate over GPUs
             network_outputs = gather([output], output_device, dim=self.dim)
-            results.extend(network_outputs)
+            for i in range(num_outputs):
+                results[i].append(network_outputs[i])
         return results

@@ -257,4 +257,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
             total_loss += loss
             total_acc += acc
 
-        return total_loss, total_acc
+        return {
+            'loss_seg': total_loss,
+            'accuracy': total_acc
+            }
