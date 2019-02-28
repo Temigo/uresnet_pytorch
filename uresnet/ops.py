@@ -60,5 +60,5 @@ class GraphDataParallel(torch.nn.parallel.DataParallel):
         for output in outputs:  # Iterate over GPUs
             network_outputs = gather([output], output_device, dim=self.dim)
             for i in range(num_outputs):
-                results[i].append(network_outputs[i])
+                results[i].extend(network_outputs[i])
         return results

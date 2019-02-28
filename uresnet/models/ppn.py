@@ -165,9 +165,9 @@ class PPN(torch.nn.Module):
         # print(pixel_pred.shape, scores.shape)
         # Add batch id
         # return [torch.cat([pixel_pred, positions[:, -1][:, None], scores], dim=1)]
-        return [torch.cat([pixel_pred, scores], dim=1),
-                torch.cat([ppn1_scores.get_spatial_locations().cuda().float(), ppn1_scores.features], dim=1),
-                torch.cat([ppn2_scores.get_spatial_locations().cuda().float(), ppn2_scores.features], dim=1)]
+        return [[torch.cat([pixel_pred, scores], dim=1)],
+                [torch.cat([ppn1_scores.get_spatial_locations().cuda().float(), ppn1_scores.features], dim=1)],
+                [torch.cat([ppn2_scores.get_spatial_locations().cuda().float(), ppn2_scores.features], dim=1)]]
 
 
 class PPN_FCN(torch.nn.Module):
@@ -388,7 +388,6 @@ class SegmentationLoss0(torch.nn.modules.loss._Loss):
             'loss_class': total_class,
             'loss_distance': total_distance
         }
-
 
 
 class SegmentationLoss(torch.nn.modules.loss._Loss):
