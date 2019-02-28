@@ -16,6 +16,28 @@ class SelectionFeatures(torch.nn.Module):
         return input
 
 
+class AddLabels(torch.nn.Module):
+    def __init__(self):
+        super(AddLabels, self).__init__()
+
+    def forward(self, attention, label):
+        output = scn.SparseConvNetTensor()
+        output.metadata = attention.metadata
+        output.spatial_size = attention.spatial_size
+        output.features = attention.features.new().resize_(1).expand_as(attention.features).fill_(1.0)
+        output.features = output.features * attention.features
+        positions = attention.get_spatial_locations().cuda()
+        # print(positions.max(), label.max())
+        for l in label:
+            index = (positions == l).all(dim=1)
+            # print(index.long().sum(), l)
+            output.features[index] = 1.0
+        return output
+
+    def input_spatial_size(self, out_size):
+        return out_size
+
+
 class Multiply(torch.nn.Module):
     def __init__(self):
         super(Multiply, self).__init__()
@@ -33,7 +55,7 @@ class Multiply(torch.nn.Module):
 
 
 class Selection(torch.nn.Module):
-    def __init__(self, threshold=0.1):
+    def __init__(self, threshold=0.5):
         super(Selection, self).__init__()
         self.threshold = threshold
         self.softmax = torch.nn.Softmax(dim=1)

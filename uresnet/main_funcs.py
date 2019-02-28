@@ -121,6 +121,8 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         loss_class = np.mean(res['loss_class'])
         loss_ppn1 = np.mean(res['loss_ppn1'])
         loss_ppn2 = np.mean(res['loss_ppn2'])
+        acc_ppn1 = np.mean(res['acc_ppn1'])
+        acc_ppn2 = np.mean(res['acc_ppn2'])
 
     mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
 
@@ -143,6 +145,7 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         if 'ppn' in flags.MODEL_NAME:
             handlers.csv_logger.record(('loss_class', 'loss_distance'), (loss_class, loss_distance))
             handlers.csv_logger.record(('loss_ppn1', 'loss_ppn2'), (loss_ppn1, loss_ppn2))
+            handlers.csv_logger.record(('acc_ppn1', 'acc_ppn2'), (acc_ppn1, acc_ppn2))
         handlers.csv_logger.write()
 
     # Report (stdout)

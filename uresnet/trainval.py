@@ -25,6 +25,7 @@ class trainval(object):
 
         self._optimizer.zero_grad()  # Reset gradients accumulation
         total_loss.backward()
+        # torch.nn.utils.clip_grad_norm_(self._net.parameters(), 1.0)
         self._optimizer.step()
 
     def save_state(self, iteration):
@@ -90,11 +91,6 @@ class trainval(object):
         with torch.set_grad_enabled(self._flags.TRAIN):
             # Segmentation
             data = [torch.as_tensor(d).cuda() for d in data]
-            tstart = time.time()
-            segmentation = self._net(data)
-
-            # If label is given, compute the loss
-            loss_seg, acc = 0., 0.
             if label is not None:
                 label = [torch.as_tensor(l).cuda() for l in label]
                 for l in label:
@@ -104,6 +100,12 @@ class trainval(object):
                     weight = [torch.as_tensor(w).cuda() for w in weight]
                     for w in weight:
                         w.requires_grad = False
+            tstart = time.time()
+            segmentation = self._net(zip(data, label))
+
+            # If label is given, compute the loss
+            loss_seg, acc = 0., 0.
+            if label is not None:
                 loss_acc = self._criterion(segmentation, data, label, weight)
                 if self._flags.TRAIN:
                     self._loss.append(loss_acc['loss_seg'])
