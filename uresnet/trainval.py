@@ -174,7 +174,10 @@ class trainval(object):
                 raise ValueError
             print('Restoring weights from %s...' % self._flags.MODEL_PATH)
             with open(self._flags.MODEL_PATH, 'rb') as f:
-                checkpoint = torch.load(f)
+                if len(self._flags.GPUS) > 0:
+                    checkpoint = torch.load(f)
+                else:
+                    checkpoint = torch.load(f, map_location='cpu')
                 # print(checkpoint['state_dict']['module.conv1.1.running_mean'],
                 #       checkpoint['state_dict']['module.conv1.1.running_var'])
                 # for key in checkpoint['state_dict']:

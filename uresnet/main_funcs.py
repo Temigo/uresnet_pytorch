@@ -11,6 +11,7 @@ from uresnet.iotools import io_factory
 from uresnet.trainval import trainval
 import uresnet.utils as utils
 import torch
+import psutil
 
 
 def iotest(flags):
@@ -120,7 +121,8 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     if len(flags.GPUS) > 0:
         mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
     else:
-        mem = utils.round_decimals(map(int, os.popen('free -t -b').readlines()[-1].split()[1:])[1]/1.e9, 3)
+        p = psutil.Process()
+        mem = utils.round_decimals(p.memory_full_info()[7]/1.e9, 3)
 
     # Report (logger)
     if handlers.csv_logger:
@@ -408,33 +410,35 @@ def full_inference_loop(flags, handlers):
             for j, bin in enumerate(res['distances'][i]):
                 handlers.metrics_logger.record(['bin_%d' % j], [bin])
         if flags.PARTICLE:
-            handlers.metrics_logger.record(['michel_num', 'michel_actual_num', 'michel_deposited_energy', 'michel_npx', 'michel_creation_energy', 'michel_creation_momentum',
+            handlers.metrics_logger.record(['michel_num', 'michel_actual_num', 'michel_npx', 'michel_creation_momentum',
                                             'michel_start_x', 'michel_start_y', 'michel_start_z',
                                             'michel_end_x', 'michel_end_y', 'michel_end_z',
                                             'michel_creation_x', 'michel_creation_y', 'michel_creation_z'],
-                                           [res['michel_num'][i], res['michel_actual_num'][i], res['michel_deposited_energy'][i], res['michel_npx'][i], res['michel_creation_energy'][i], res['michel_creation_momentum'][i],
+                                           [res['michel_num'][i], res['michel_actual_num'][i], res['michel_npx'][i], res['michel_creation_momentum'][i],
                                             res['michel_start_x'][i], res['michel_start_y'][i], res['michel_start_z'][i],
                                             res['michel_end_x'][i], res['michel_end_y'][i], res['michel_end_z'][i],
                                             res['michel_creation_x'][i], res['michel_creation_y'][i], res['michel_creation_z'][i]])
             for j in range(len(res['michel_appended'][i])):
                 handlers.michel_logger.record(['id', 'michel_appended', 'michel_num_pix', 'michel_sum_pix',
-                                               'michel_num_pix_pred', 'michel_sum_pix_pred'],
+                                               'michel_num_pix_pred', 'michel_sum_pix_pred',
+                                               'michel_creation_energy', 'michel_deposited_energy'],
                                               [idx, res['michel_appended'][i][j], res['michel_num_pix'][i][j], res['michel_sum_pix'][i][j],
-                                               res['michel_num_pix_pred'][i][j], res['michel_sum_pix_pred'][i][j]])
+                                               res['michel_num_pix_pred'][i][j], res['michel_sum_pix_pred'][i][j],
+                                               res['michel_creation_energy'][i][j], res['michel_deposited_energy'][i][j]])
                 handlers.michel_logger.write()
             for j in range(len(res['michel_is_edge'][i])):
                 handlers.michel_logger2.record(['id', 'michel_is_edge', 'michel_is_attached',
                                                 'michel_pred_num_pix', 'michel_pred_sum_pix',
                                                 'michel_pred_num_pix_true', 'michel_pred_sum_pix_true',
-                                                'michel_true_num_pix', 'michel_true_sum_pix'],
+                                                'michel_true_num_pix', 'michel_true_sum_pix',
+                                                'michel_true_energy'],
                                                [idx, res['michel_is_edge'][i][j], res['michel_is_attached'][i][j],
                                                 res['michel_pred_num_pix'][i][j], res['michel_pred_sum_pix'][i][j],
                                                 res['michel_pred_num_pix_true'][i][j], res['michel_pred_sum_pix_true'][i][j],
-                                                res['michel_true_num_pix'][i][j], res['michel_true_sum_pix'][i][j]])
+                                                res['michel_true_num_pix'][i][j], res['michel_true_sum_pix'][i][j],
+                                                res['michel_true_energy'][i][j]])
                 handlers.michel_logger2.write()
         handlers.metrics_logger.write()
-        # if flags.PARTICLE:
-        #     handlers.michel_logger.write()
 
     if 'misclassified_pixels' in res:
         res['misclassified_pixels'] = np.concatenate(res['misclassified_pixels'], axis=0)

@@ -124,6 +124,7 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
         'michel_pred_sum_pix_true': [],  # Sum of pix in predicted cluster inter matched true cluster
         'michel_true_num_pix': [],  # Num of pix in matched true cluster
         'michel_true_sum_pix': [],  # Sum of pix in matched true cluster
+        'michel_true_energy': [],
     }
     dbscan_vv = []
     for i, label in enumerate(label_v):
@@ -203,7 +204,7 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                 michel_index = p['category'] == 4
                 res['michel_num'].append(michel_index.astype(np.int32).sum())
                 res['michel_actual_num'].append(np.count_nonzero(p['npx'][michel_index]))
-                res['michel_deposited_energy'].append(p['deposited_energy'][michel_index].sum())
+                # res['michel_deposited_energy'].append(p['deposited_energy'][michel_index].sum())
                 res['michel_start_x'].append(p['start_x'][michel_index].mean())
                 res['michel_start_y'].append(p['start_y'][michel_index].mean())
                 res['michel_start_z'].append(p['start_z'][michel_index].mean())
@@ -214,7 +215,7 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                 res['michel_creation_y'].append(p['creation_y'][michel_index].mean())
                 res['michel_creation_z'].append(p['creation_z'][michel_index].mean())
                 res['michel_npx'].append(p['npx'][michel_index].sum())
-                res['michel_creation_energy'].append(p['creation_energy'][michel_index].mean())
+                # res['michel_creation_energy'].append(p['creation_energy'][michel_index].mean())
                 res['michel_creation_momentum'].append(p['creation_momentum'][michel_index].mean())
                 # if res['michel_actual_num'][-1] == 1 and np.count_nonzero(event_label==4) > 0 and np.count_nonzero(event_label==1) > 0:
                 #     MIP_index = event_label == 1
@@ -236,8 +237,11 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                 MIP_coords_pred = event_data[(predictions==1).reshape((-1,)), ...][:, :-2]
                 Michel_coords_pred = event_data[(predictions==4).reshape((-1,)), ...][:, :-2]
 
+                Michel_start = np.vstack([p['start_x'][michel_index], p['start_y'][michel_index], p['start_z'][michel_index]]).T
+
                 michel_appended, michel_sum_pix, michel_num_pix = [], [], []
                 michel_num_pix_pred, michel_sum_pix_pred = [], []
+                michel_deposited_energy, michel_creation_energy = [], []
                 if Michel_coords.shape[0] > 0:
                     # MIP_clusters = DBSCAN(eps=1, min_samples=10).fit(MIP_coords).labels_
                     Michel_true_clusters = DBSCAN(eps=2.8284271247461903, min_samples=5).fit(Michel_coords).labels_
@@ -247,7 +251,13 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                         current_index = Michel_true_clusters == Michel_id
                         distances = cdist(Michel_coords[current_index], MIP_coords)
                         is_attached = np.min(distances) < 2.8284271247461903
-                        # is_edge = TODO
+                        # Match to MC Michel
+                        distances2 = cdist(Michel_coords[current_index], Michel_start)
+                        closest_mc = np.argmin(distances2, axis=1)
+                        closest_mc_id = closest_mc[np.bincount(closest_mc).argmax()]
+                        michel_deposited_energy.append(p['deposited_energy'][michel_index][closest_mc_id])
+                        michel_creation_energy.append(p['creation_energy'][michel_index][closest_mc_id])
+
                         michel_appended.append(is_attached)
                         michel_sum_pix.append(event_data[(event_label==4).reshape((-1,)), ...][current_index][:, -1].sum())
                         michel_num_pix.append(np.count_nonzero(current_index))
@@ -258,6 +268,7 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                 michel_pred_num_pix, michel_pred_sum_pix = [], []
                 michel_pred_num_pix_true, michel_pred_sum_pix_true = [], []
                 michel_true_num_pix, michel_true_sum_pix = [], []
+                michel_true_energy = []
                 if Michel_coords_pred.shape[0] > 0:
                     MIP_clusters = DBSCAN(eps=2.8284271247461903, min_samples=10).fit(MIP_coords_pred).labels_
                     Michel_pred_clusters = DBSCAN(eps=2.8284271247461903, min_samples=5).fit(Michel_coords_pred).labels_
@@ -286,22 +297,34 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                         michel_pred_sum_pix_true.append(-1)
                         michel_true_num_pix.append(-1)
                         michel_true_sum_pix.append(-1)
+                        michel_true_energy.append(-1)
                         # Match closest true Michel cluster
                         if is_attached and is_edge and Michel_coords.shape[0] > 0:
                             distances = cdist(Michel_coords_pred[current_index], Michel_coords)
                             closest_clusters = Michel_true_clusters[np.argmin(distances, axis=1)]
-                            closest_true_id = closest_clusters[np.bincount(closest_clusters).argmax()]
-                            if closest_true_id > -1:
-                                closest_true_index = event_label[predictions==4][current_index]==4
-                                michel_pred_num_pix_true[-1] = np.count_nonzero(closest_true_index)
-                                michel_pred_sum_pix_true[-1] = event_data[(predictions==4).reshape((-1,)), ...][current_index][(closest_true_index).reshape((-1,)), ...][:, -1].sum()
-                                michel_true_num_pix[-1] = np.count_nonzero(Michel_true_clusters == closest_true_id)
-                                michel_true_sum_pix[-1] = event_data[(event_label==4).reshape((-1,)), ...][Michel_true_clusters == closest_true_id][:, -1].sum()
+                            closest_clusters = closest_clusters[closest_clusters > -1]
+                            if len(closest_clusters) > 0:
+                                closest_true_id = closest_clusters[np.bincount(closest_clusters).argmax()]
+                                if closest_true_id > -1:
+                                    closest_true_index = event_label[predictions==4][current_index]==4
+                                    michel_pred_num_pix_true[-1] = np.count_nonzero(closest_true_index)
+                                    michel_pred_sum_pix_true[-1] = event_data[(predictions==4).reshape((-1,)), ...][current_index][(closest_true_index).reshape((-1,)), ...][:, -1].sum()
+                                    michel_true_num_pix[-1] = np.count_nonzero(Michel_true_clusters == closest_true_id)
+                                    michel_true_sum_pix[-1] = event_data[(event_label==4).reshape((-1,)), ...][Michel_true_clusters == closest_true_id][:, -1].sum()
+                                    # Register true energy
+                                    # Match to MC Michel
+                                    distances2 = cdist(Michel_coords[Michel_true_clusters == closest_true_id], Michel_start)
+                                    closest_mc = np.argmin(distances2, axis=1)
+                                    closest_mc_id = closest_mc[np.bincount(closest_mc).argmax()]
+                                    # closest_mc_id = closest_mc[np.bincount(closest_mc).argmax()]
+                                    michel_true_energy[-1] = p['creation_energy'][michel_index][closest_mc_id]
                 res['michel_appended'].append(michel_appended)
                 res['michel_sum_pix'].append(michel_sum_pix)
                 res['michel_num_pix'].append(michel_num_pix)
                 res['michel_sum_pix_pred'].append(michel_sum_pix_pred)
                 res['michel_num_pix_pred'].append(michel_num_pix_pred)
+                res['michel_deposited_energy'].append(michel_deposited_energy)
+                res['michel_creation_energy'].append(michel_creation_energy)
 
                 res['michel_is_attached'].append(michel_is_attached)
                 res['michel_is_edge'].append(michel_is_edge)
@@ -311,6 +334,7 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                 res['michel_pred_sum_pix_true'].append(michel_pred_sum_pix_true)
                 res['michel_true_num_pix'].append(michel_true_num_pix)
                 res['michel_true_sum_pix'].append(michel_true_sum_pix)
+                res['michel_true_energy'].append(michel_true_energy)
 
             # Save event displays of softmax scores
             # if event_label.shape[0] > 500 or class_pixel[4] > 20:
