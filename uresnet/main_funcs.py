@@ -111,8 +111,8 @@ def get_keys(flags):
         weight_key = flags.DATA_KEYS[2]
     return data_key, label_key, weight_key
 
-def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
 
+def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     report_step  = flags.REPORT_STEP and ((handlers.iteration+1) % flags.REPORT_STEP == 0)
 
     loss_seg = np.mean(res['loss_seg'])
@@ -278,7 +278,8 @@ def full_inference_loop(flags, handlers):
     weights = glob.glob(flags.MODEL_PATH)
     print(weights)
     idx_v, blob_v = [], []
-    if flags.ITERATION <= 300:
+    whole_dataset = flags.ITERATION*handlers.data_io.batch_per_step() >= handlers.data_io.num_entries()
+    if not whole_dataset:
         for i in range(flags.ITERATION):
             idx, blob = handlers.data_io.next()
             idx_v.append(idx)
@@ -292,22 +293,13 @@ def full_inference_loop(flags, handlers):
             tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             tstart_iteration = time.time()
 
-            if flags.ITERATION > 300:
+            if whole_dataset:
                 idx, blob = handlers.data_io.next()
             else:
                 idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
 
-            # if idx[0] not in [10731.,  3033.,  5677.,  9820., 18088., 13372.,  4342.,  2677.,
-            #                   8788.,  6201.,  7780.,  2474.,  6608.,  4541.,  5453.,  7778.,
-            #                   18523.,  1633., 16910.,   713.,  2925., 19938., 11231.,  6616.,
-            #                   14834., 11040., 19469., 15450., 12583.,  4824.,  8399., 13127.,
-            #                   15828., 12510.,  5336.,  4144., 13622.]:
-            #     handlers.iteration += 1
-            #     continue
-
             data_blob = {}
             data_blob['data'] = [blob[data_key]]
-            # print(data_blob['data'][0].shape)
             if label_key is not None:
                 data_blob['label'] = [blob[label_key]]
             if weight_key is not None:
@@ -338,30 +330,19 @@ def full_inference_loop(flags, handlers):
                 else:
                     metrics = utils.compute_metrics_dense(blob[data_key], blob[label_key], res['softmax'], idx)
                 metrics['id'] = idx
-                # metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
                 metrics['iteration'] = [loaded_iteration] * len(metrics['acc'])
                 for key in metrics:
                     if key in global_metrics:
                         global_metrics[key].extend(metrics[key])
                     else:
                         global_metrics[key] = list(metrics[key])
-                #ninety_quantile = utils.quantiles(blob[label_key], res['softmax'])
 
-            # Store output if requested
-            # Study low acc Michels
-            # class_acc = np.array(metrics['class_acc'])
-            # low_michel = class_acc[:, -1].mean() <= 0.6
-            # michel_pixel = np.array(metrics['class_pixel'])[:, -1]
-            # print(global_metrics['class_acc'])
-            # if flags.OUTPUT_FILE and metrics['class_acc'][0][4] <= 0.84747945:
-            #     handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
             handlers.iteration += 1
 
     # Metrics
     if len(global_metrics['id']):
         global_metrics['id'] = np.hstack(global_metrics['id'])
     global_metrics['iteration'] = np.hstack(global_metrics['iteration'])
-    # global_metrics['iteration'] = np.repeat(global_metrics['iteration'][:, None], global_metrics['id'].shape[1])
     for key in global_metrics:
         global_metrics[key] = np.array(global_metrics[key])
 
@@ -380,7 +361,6 @@ def full_inference_loop(flags, handlers):
     # Mean softmax score for the correct prediction
     for key in global_metrics:
         res[key] = global_metrics[key]
-    # print(res)
     for i, idx in enumerate(res['id']):
         handlers.metrics_logger.record(('iteration', 'id', 'acc', 'nonzero_pixels'),
                 (res['iteration'][i], idx, res['acc'][i], res['nonzero_pixels'][i]))
