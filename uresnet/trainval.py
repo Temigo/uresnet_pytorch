@@ -8,6 +8,8 @@ import sys
 from uresnet.ops import GraphDataParallel
 import uresnet.models as models
 import numpy as np
+import matplotlib
+from matplotlib import pyplot as plt
 
 
 class trainval(object):
@@ -82,22 +84,40 @@ class trainval(object):
         data = data_blob['data']
         label = data_blob.get('label', None)
         weight = data_blob.get('weight', None)
-
+        # matplotlib.image.imsave('data0.png', data[0, 0, ...])
+        # matplotlib.image.imsave('data1.png', data[1, 0, ...])
+        # print(label.shape, np.unique(label, return_counts=True))
+        # matplotlib.image.imsave('label0.png', label[0, 0, ...])
+        # matplotlib.image.imsave('label1.png', label[1, 0, ...])
         with torch.set_grad_enabled(self._flags.TRAIN):
             # Segmentation
-            data = [torch.as_tensor(d).cuda() for d in data]
+            data = [torch.as_tensor(d) for d in data]
+            if torch.cuda.is_available():
+                data = [d.cuda() for d in data]
+            else:
+                data = data[0]
             tstart = time.time()
             segmentation = self._net(data)
+            if not torch.cuda.is_available():
+                data = [data]
 
             # If label is given, compute the loss
             loss_seg, acc = 0., 0.
             if label is not None:
-                label = [torch.as_tensor(l).cuda() for l in label]
+                label = [torch.as_tensor(l) for l in label]
+                if torch.cuda.is_available():
+                    label = [l.cuda() for l in label]
+                # else:
+                #     label = label[0]
                 for l in label:
                     l.requires_grad = False
                 # Weight is optional for loss
                 if weight is not None:
-                    weight = [torch.as_tensor(w).cuda() for w in weight]
+                    weight = [torch.as_tensor(w) for w in weight]
+                    if torch.cuda.is_available():
+                        weight = [w.cuda() for w in weight]
+                    # else:
+                    #     weight = weight[0]
                     for w in weight:
                         w.requires_grad = False
                 loss_seg, acc = self._criterion(segmentation, data, label, weight)
@@ -118,24 +138,31 @@ class trainval(object):
         model = None
         if self._flags.MODEL_NAME == 'uresnet_sparse':
             model = models.SparseUResNet
-            self._criterion = models.SparseSegmentationLoss(self._flags).cuda()
+            self._criterion = models.SparseSegmentationLoss(self._flags)
         elif self._flags.MODEL_NAME == 'uresnet_dense':
             model = models.DenseUResNet
-            self._criterion = models.DenseSegmentationLoss(self._flags).cuda()
+            self._criterion = models.DenseSegmentationLoss(self._flags)
         else:
             raise Exception("Unknown model name provided")
 
         self.tspent_sum['forward'] = self.tspent_sum['train'] = self.tspent_sum['save'] = 0.
         self.tspent['forward'] = self.tspent['train'] = self.tspent['save'] = 0.
 
+        # if len(self._flags.GPUS) > 0:
         self._net = GraphDataParallel(model(self._flags),
                                       device_ids=self._flags.GPUS,
                                       dense=('sparse' not in self._flags.MODEL_NAME))
+        # else:
+        #     self._net = model
 
         if self._flags.TRAIN:
-            self._net.train().cuda()
+            self._net.train()
         else:
-            self._net.eval().cuda()
+            self._net.eval()
+
+        if torch.cuda.is_available():
+            self._net.cuda()
+            self._criterion.cuda()
 
         self._optimizer = torch.optim.Adam(self._net.parameters(), lr=self._flags.LEARNING_RATE)
         self._softmax = torch.nn.Softmax(dim=1 if 'sparse' in self._flags.MODEL_NAME else 0)
@@ -147,9 +174,24 @@ class trainval(object):
                 raise ValueError
             print('Restoring weights from %s...' % self._flags.MODEL_PATH)
             with open(self._flags.MODEL_PATH, 'rb') as f:
-                checkpoint = torch.load(f)
-                self._net.load_state_dict(checkpoint['state_dict'])
-                self._optimizer.load_state_dict(checkpoint['optimizer'])
+                if len(self._flags.GPUS) > 0:
+                    checkpoint = torch.load(f)
+                else:
+                    checkpoint = torch.load(f, map_location='cpu')
+                # print(checkpoint['state_dict']['module.conv1.1.running_mean'],
+                #       checkpoint['state_dict']['module.conv1.1.running_var'])
+                # for key in checkpoint['state_dict']:
+                #     if key not in self._net.state_dict():
+                #         checkpoint['state_dict'].pop(key, None)
+                #         print('Ignoring %s' % key)
+                # new_state = self._net.state_dict()
+                # new_state.update(checkpoint['state_dict'])
+                self._net.load_state_dict(checkpoint['state_dict'], strict=False)
+                if self._flags.TRAIN:
+                    # This overwrites the learning rate, so reset the learning rate
+                    self._optimizer.load_state_dict(checkpoint['optimizer'])
+                    for g in self._optimizer.param_groups:
+                        g['lr'] = self._flags.LEARNING_RATE
                 iteration = checkpoint['global_step'] + 1
             print('Done.')
 

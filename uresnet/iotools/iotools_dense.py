@@ -127,7 +127,6 @@ class io_larcv_dense(io_base):
         self._ihandler.next(store_entries=True,store_event_ids=True)
         self._next_counter = 0
         self._num_entries = self._ihandler._proc.pd().io().get_n_entries()
-        print('hi')
         self._num_channels = self._ihandler.fetch_data(self._flags.DATA_KEYS[0]).dim()[-1]
 
         if self._flags.OUTPUT_FILE:

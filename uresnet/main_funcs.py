@@ -11,6 +11,7 @@ from uresnet.iotools import io_factory
 from uresnet.trainval import trainval
 import uresnet.utils as utils
 import torch
+import psutil
 
 
 def iotest(flags):
@@ -56,7 +57,8 @@ def inference(flags):
 
 
 def prepare(flags):
-    torch.cuda.set_device(flags.GPUS[0])
+    if len(flags.GPUS) > 0:
+        torch.cuda.set_device(flags.GPUS[0])
     handlers = Handlers()
 
     # IO configuration
@@ -64,7 +66,7 @@ def prepare(flags):
     handlers.data_io.initialize()
     if 'sparse' in flags.IO_TYPE:
         handlers.data_io.start_threads()
-        handlers.data_io.next()
+        # handlers.data_io.next()
     if 'sparse' in flags.MODEL_NAME and 'sparse' not in flags.IO_TYPE:
         sys.stderr.write('Sparse UResNet needs sparse IO.')
         sys.exit(1)
@@ -94,6 +96,9 @@ def prepare(flags):
         handlers.csv_logger = utils.CSVData(logname)
         if not flags.TRAIN and flags.FULL:
             handlers.metrics_logger = utils.CSVData('%s/metrics_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
+            handlers.pixels_logger = utils.CSVData('%s/pixels_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
+            handlers.michel_logger = utils.CSVData('%s/michel_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
+            handlers.michel_logger2 = utils.CSVData('%s/michel2_log-%07d.csv' % (flags.LOG_DIR, loaded_iteration))
     return handlers
 
 
@@ -113,7 +118,11 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     loss_seg = np.mean(res['loss_seg'])
     acc_seg  = np.mean(res['accuracy'])
 
-    mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
+    if len(flags.GPUS) > 0:
+        mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
+    else:
+        p = psutil.Process()
+        mem = utils.round_decimals(p.memory_full_info()[7]/1.e9, 3)
 
     # Report (logger)
     if handlers.csv_logger:
@@ -126,9 +135,9 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         if flags.TRAIN:
             handlers.csv_logger.record(('ttrain','tsave','tsumtrain','tsumsave'),
                                        (tmap['train'],tmap['save'],tsum_map['train'],tsum_map['save']))
-        else:
-            handlers.csv_logger.record(('tforward','tsave','tsumforward','tsumsave'),
-                                       (tmap['forward'],tmap['save'],tsum_map['forward'],tsum_map['save']))
+        # else:
+        handlers.csv_logger.record(('tforward','tsave','tsumforward','tsumsave'),
+                                   (tmap['forward'],tmap['save'],tsum_map['forward'],tsum_map['save']))
 
         handlers.csv_logger.record(('loss_seg','acc_seg'),(loss_seg,acc_seg))
         handlers.csv_logger.write()
@@ -162,7 +171,7 @@ def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
     if label_key  is not None: data_blob['label' ] = []
     if weight_key is not None: data_blob['weight'] = []
 
-    for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * len(flags.GPUS)))):
+    for _ in range(int(flags.BATCH_SIZE / (flags.MINIBATCH_SIZE * max(1, len(flags.GPUS))))):
         idx, blob = handlers.data_io.next()
         data_blob['data'].append(blob[data_key])
         data_blob['idx_v'].append(idx)
@@ -175,8 +184,8 @@ def get_data_minibatched(handlers, flags, data_key, label_key, weight_key):
 def train_loop(flags, handlers):
     data_key, label_key, weight_key = get_keys(flags)
     tsum = 0.
-    handlers.data_io.next()
-    handlers.data_io.next()
+    # handlers.data_io.next()
+    # handlers.data_io.next()
     while handlers.iteration < flags.ITERATION:
         epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
         tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
@@ -269,10 +278,11 @@ def full_inference_loop(flags, handlers):
     weights = glob.glob(flags.MODEL_PATH)
     print(weights)
     idx_v, blob_v = [], []
-    for i in range(flags.ITERATION):
-        idx, blob = handlers.data_io.next()
-        idx_v.append(idx)
-        blob_v.append(blob)
+    if flags.ITERATION <= 300:
+        for i in range(flags.ITERATION):
+            idx, blob = handlers.data_io.next()
+            idx_v.append(idx)
+            blob_v.append(blob)
 
     for weight in weights:
         handlers.trainer._flags.MODEL_PATH = weight
@@ -282,8 +292,18 @@ def full_inference_loop(flags, handlers):
             tstamp_iteration = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
             tstart_iteration = time.time()
 
-            # idx, blob = handlers.data_io.next()
-            idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
+            if flags.ITERATION > 300:
+                idx, blob = handlers.data_io.next()
+            else:
+                idx, blob = idx_v[handlers.iteration], blob_v[handlers.iteration]
+
+            # if idx[0] not in [10731.,  3033.,  5677.,  9820., 18088., 13372.,  4342.,  2677.,
+            #                   8788.,  6201.,  7780.,  2474.,  6608.,  4541.,  5453.,  7778.,
+            #                   18523.,  1633., 16910.,   713.,  2925., 19938., 11231.,  6616.,
+            #                   14834., 11040., 19469., 15450., 12583.,  4824.,  8399., 13127.,
+            #                   15828., 12510.,  5336.,  4144., 13622.]:
+            #     handlers.iteration += 1
+            #     continue
 
             data_blob = {}
             data_blob['data'] = [blob[data_key]]
@@ -298,8 +318,8 @@ def full_inference_loop(flags, handlers):
                                            batch_size=flags.BATCH_SIZE)
 
             # Store output if requested
-            # if flags.OUTPUT_FILE:
-            #     handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
+            if flags.OUTPUT_FILE:
+                handlers.data_io.store_segment(idx,blob[data_key],res['softmax'])
 
             epoch = handlers.iteration * float(flags.BATCH_SIZE) / handlers.data_io.num_entries()
             tspent_iteration = time.time() - tstart_iteration
@@ -309,9 +329,14 @@ def full_inference_loop(flags, handlers):
             # Log metrics
             if label_key is not None:
                 if flags.MODEL_NAME == 'uresnet_sparse':
-                    metrics, dbscans = utils.compute_metrics_sparse(blob[data_key], blob[label_key], res['softmax'])
+                    metrics, dbscans = utils.compute_metrics_sparse(blob[data_key],
+                                                                    blob[label_key],
+                                                                    res['softmax'],
+                                                                    idx,
+                                                                    N=flags.SPATIAL_SIZE,
+                                                                    particles=blob['particles'] if flags.PARTICLE else None)
                 else:
-                    metrics = utils.compute_metrics_dense(blob[data_key], blob[label_key], res['softmax'])
+                    metrics = utils.compute_metrics_dense(blob[data_key], blob[label_key], res['softmax'], idx)
                 metrics['id'] = idx
                 # metrics['iteration'] = [loaded_iteration] * len(idx) * len(idx[0])
                 metrics['iteration'] = [loaded_iteration] * len(metrics['acc'])
@@ -327,12 +352,9 @@ def full_inference_loop(flags, handlers):
             # class_acc = np.array(metrics['class_acc'])
             # low_michel = class_acc[:, -1].mean() <= 0.6
             # michel_pixel = np.array(metrics['class_pixel'])[:, -1]
-            # if flags.OUTPUT_FILE and low_michel and michel_pixel[0] > 200:
-            #     print(idx, class_acc,np.array( metrics['class_cluster_acc'])[:, -1], michel_pixel)
-            #     if label_key is None:
-            #         handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
-            #     else:
-            #         handlers.data_io.store_segment(idx, blob[data_key], res['softmax'], clusters=dbscans)
+            # print(global_metrics['class_acc'])
+            # if flags.OUTPUT_FILE and metrics['class_acc'][0][4] <= 0.84747945:
+            #     handlers.data_io.store_segment(idx, blob[data_key], res['softmax'])
             handlers.iteration += 1
 
     # Metrics
@@ -358,26 +380,87 @@ def full_inference_loop(flags, handlers):
     # Mean softmax score for the correct prediction
     for key in global_metrics:
         res[key] = global_metrics[key]
-    print(res)
+    # print(res)
     for i, idx in enumerate(res['id']):
         handlers.metrics_logger.record(('iteration', 'id', 'acc', 'nonzero_pixels'),
                 (res['iteration'][i], idx, res['acc'][i], res['nonzero_pixels'][i]))
+        if 'loss_seg' in res:
+            handlers.metrics_logger.record(('loss_seg',), (res['loss_seg'][i],))
         if 'correct_softmax' in res:
             handlers.metrics_logger.record(('correct_softmax',), (res['correct_softmax'][i],))
-        if 'cluster_acc' in res:
-            handlers.metrics_logger.record(('cluster_acc',), (res['cluster_acc'][i],))
+        # if 'cluster_acc' in res:
+        #     handlers.metrics_logger.record(('cluster_acc',), (res['cluster_acc'][i],))
         if 'class_acc' in res:
             handlers.metrics_logger.record(['class_%d_acc' % c for c in range(len(res['class_acc'][i]))], [res['class_acc'][i][c] for c in range(len(res['class_acc'][i]))])
-        if 'class_cluster_acc' in res:
-            handlers.metrics_logger.record(['class_%d_cluster_acc' % c for c in range(len(res['class_cluster_acc'][i]))], [res['class_cluster_acc'][i][c] for c in range(len(res['class_cluster_acc'][i]))])
+        # if 'class_cluster_acc' in res:
+        #     handlers.metrics_logger.record(['class_%d_cluster_acc' % c for c in range(len(res['class_cluster_acc'][i]))], [res['class_cluster_acc'][i][c] for c in range(len(res['class_cluster_acc'][i]))])
         if 'class_pixel' in res:
             handlers.metrics_logger.record(['class_%d_pixel' % c for c in range(len(res['class_pixel'][i]))], [res['class_pixel'][i][c] for c in range(len(res['class_pixel'][i]))])
         if 'class_mean_softmax' in res:
             handlers.metrics_logger.record(['class_%d_mean_softmax' % c for c in range(len(res['class_mean_softmax'][i]))], [res['class_mean_softmax'][i][c] for c in range(len(res['class_mean_softmax'][i]))])
+        if 'confusion_matrix' in res:
+            num_classes = res['confusion_matrix'][0].shape[0]
+            for c in range(num_classes):
+                handlers.metrics_logger.record(['confusion_%d_%d' % (c, c2) for c2 in range(num_classes)], [res['confusion_matrix'][i][c][c2] for c2 in range(num_classes)])
+        if 'energy_confusion_matrix' in res:
+            num_classes = res['energy_confusion_matrix'][0].shape[0]
+            for c in range(num_classes):
+                handlers.metrics_logger.record(['energy_confusion_%d_%d' % (c, c2) for c2 in range(num_classes)], [res['energy_confusion_matrix'][i][c][c2] for c2 in range(num_classes)])
+        if 'distances' in res:
+            for j, bin in enumerate(res['distances'][i]):
+                handlers.metrics_logger.record(['bin_%d' % j], [bin])
+        if flags.PARTICLE:
+            handlers.metrics_logger.record(['michel_num', 'michel_actual_num', 'michel_npx', 'michel_creation_momentum',
+                                            'michel_start_x', 'michel_start_y', 'michel_start_z',
+                                            'michel_end_x', 'michel_end_y', 'michel_end_z',
+                                            'michel_creation_x', 'michel_creation_y', 'michel_creation_z'],
+                                           [res['michel_num'][i], res['michel_actual_num'][i], res['michel_npx'][i], res['michel_creation_momentum'][i],
+                                            res['michel_start_x'][i], res['michel_start_y'][i], res['michel_start_z'][i],
+                                            res['michel_end_x'][i], res['michel_end_y'][i], res['michel_end_z'][i],
+                                            res['michel_creation_x'][i], res['michel_creation_y'][i], res['michel_creation_z'][i]])
+            for j in range(len(res['michel_appended'][i])):
+                handlers.michel_logger.record(['id', 'michel_appended', 'michel_num_pix', 'michel_sum_pix',
+                                               'michel_num_pix_pred', 'michel_sum_pix_pred',
+                                               'michel_creation_energy', 'michel_deposited_energy'],
+                                              [idx, res['michel_appended'][i][j], res['michel_num_pix'][i][j], res['michel_sum_pix'][i][j],
+                                               res['michel_num_pix_pred'][i][j], res['michel_sum_pix_pred'][i][j],
+                                               res['michel_creation_energy'][i][j], res['michel_deposited_energy'][i][j]])
+                handlers.michel_logger.write()
+            for j in range(len(res['michel_is_edge'][i])):
+                handlers.michel_logger2.record(['id', 'michel_is_edge', 'michel_is_attached',
+                                                'michel_pred_num_pix', 'michel_pred_sum_pix',
+                                                'michel_pred_num_pix_true', 'michel_pred_sum_pix_true',
+                                                'michel_true_num_pix', 'michel_true_sum_pix',
+                                                'michel_true_energy'],
+                                               [idx, res['michel_is_edge'][i][j], res['michel_is_attached'][i][j],
+                                                res['michel_pred_num_pix'][i][j], res['michel_pred_sum_pix'][i][j],
+                                                res['michel_pred_num_pix_true'][i][j], res['michel_pred_sum_pix_true'][i][j],
+                                                res['michel_true_num_pix'][i][j], res['michel_true_sum_pix'][i][j],
+                                                res['michel_true_energy'][i][j]])
+                handlers.michel_logger2.write()
         handlers.metrics_logger.write()
+
+    if 'misclassified_pixels' in res:
+        res['misclassified_pixels'] = np.concatenate(res['misclassified_pixels'], axis=0)
+        for i, x in enumerate(res['misclassified_pixels']):
+            handlers.pixels_logger.record(['pixel_label'], [x[-1]])
+            handlers.pixels_logger.record(['pixel_energy'], [x[-2]])
+            handlers.pixels_logger.record(['pixel_prediction'], [x[-3]])
+            handlers.pixels_logger.record(['pixel_predicted_softmax'], [x[-4]])
+            handlers.pixels_logger.record(['pixel_correct_softmax'], [x[-5]])
+            for d in range(flags.DATA_DIM):
+                handlers.pixels_logger.record(['pixel_coord_%d' % d], [x[d]])
+            handlers.pixels_logger.write()
+
     # Finalize
     if handlers.csv_logger:
         handlers.csv_logger.close()
     if handlers.metrics_logger:
         handlers.metrics_logger.close()
+    if handlers.pixels_logger:
+        handlers.pixels_logger.close()
+    if handlers.michel_logger:
+        handlers.michel_logger.close()
+    if handlers.michel_logger2:
+        handlers.michel_logger2.close()
     handlers.data_io.finalize()

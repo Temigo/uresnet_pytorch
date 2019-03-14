@@ -28,7 +28,7 @@ class URESNET_FLAGS:
     COMPUTE_WEIGHT = False
     SEED           = -1
     LEARNING_RATE  = 0.001
-    GPUS           = [0]
+    GPUS           = []
     WEIGHT_PREFIX  = ''
     NUM_POINT      = 2048
     NUM_CHANNEL    = -1
@@ -49,6 +49,7 @@ class URESNET_FLAGS:
     LIMIT_NUM_SAMPLE = -1
     NUM_THREADS = 1
     DATA_DIM = 3
+    PARTICLE = False
 
     def __init__(self):
         self._build_parsers()
@@ -60,7 +61,7 @@ class URESNET_FLAGS:
                             help='Log dir [default: %s]' % self.LOG_DIR)
         parser.add_argument('-sh','--shuffle',type=strtobool,default=self.SHUFFLE,
                             help='Shuffle the data entries [default: %s]' % self.SHUFFLE)
-        parser.add_argument('--gpus', type=str, default='0',
+        parser.add_argument('--gpus', type=str, default='',
                             help='GPUs to utilize (comma-separated integers')
         parser.add_argument('-nc','--num_class', type=int, default=self.NUM_CLASS,
                             help='Number of classes [default: %s]' % self.NUM_CLASS)
@@ -98,7 +99,7 @@ class URESNET_FLAGS:
                             help='Number of base filters for UResNet [default: %s]' % self.URESNET_FILTERS)
         parser.add_argument('-bnm','--bn-momentum',type=float,default=self.BN_MOMENTUM,
                             help='BatchNorm Momentum for UResNet [default: %s]' % self.BN_MOMENTUM)
-        parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT,type=strtobool,
+        parser.add_argument('-cw','--compute_weight',default=self.COMPUTE_WEIGHT, action='store_true',
                             help='Compute pixel loss weighting factor on the fly [default: %s' % self.COMPUTE_WEIGHT)
         parser.add_argument('-sd','--seed', default=self.SEED,
                                   help='Seed for random number generators [default: %s]' % self.SEED)
@@ -122,6 +123,8 @@ class URESNET_FLAGS:
         inference_parser = subparsers.add_parser("inference",help="Run inference of Edge-GCNN")
         inference_parser.add_argument('-full', '--full', default=self.FULL, action='store_true',
                                       help='Full inference mode [default: %s]' % self.FULL)
+        inference_parser.add_argument('-p', '--particle', default=self.PARTICLE, action='store_true',
+                                      help='Include particle branch [default: %s]' % self.PARTICLE)
         # IO test parser
         iotest_parser = subparsers.add_parser("iotest", help="Test iotools for Edge-GCNN")
 
@@ -155,7 +158,8 @@ class URESNET_FLAGS:
             setattr(self, name.upper(), args[name])
         # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
         os.environ['CUDA_VISIBLE_DEVICES'] = self.GPUS
-        self.GPUS = list(range(len(self.GPUS.split(','))))
+        if len(self.GPUS) > 0:
+            self.GPUS = list(range(len(self.GPUS.split(','))))
         # self.GPUS = [int(gpu) for gpu in self.GPUS.split(',')]
         self.INPUT_FILE=[str(f) for f in self.INPUT_FILE.split(',')]
         self.DATA_KEYS=self.DATA_KEYS.split(',')
@@ -170,11 +174,11 @@ class URESNET_FLAGS:
             raise ValueError
         # Assign non-default values
         if self.BATCH_SIZE < 0:
-            self.BATCH_SIZE = int(self.MINIBATCH_SIZE * len(self.GPUS))
+            self.BATCH_SIZE = int(self.MINIBATCH_SIZE * max(1, len(self.GPUS)))
         if self.MINIBATCH_SIZE < 0:
-            self.MINIBATCH_SIZE = int(self.BATCH_SIZE / len(self.GPUS))
+            self.MINIBATCH_SIZE = int(self.BATCH_SIZE / max(1, len(self.GPUS)))
         # Check consistency
-        if not (self.BATCH_SIZE % (self.MINIBATCH_SIZE * len(self.GPUS))) == 0:
+        if not (self.BATCH_SIZE % (self.MINIBATCH_SIZE * max(1, len(self.GPUS)))) == 0:
             print('BATCH_SIZE (-bs) must be multiples of MINIBATCH_SIZE (-mbs) and GPU count (--gpus)!')
             raise ValueError
         # Check compute_weight option
