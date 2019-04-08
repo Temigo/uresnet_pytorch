@@ -302,11 +302,13 @@ def compute_metrics_sparse(data_v, label_v, softmax_v, idx_v, N=192, particles=N
                         if is_attached and is_edge and Michel_coords.shape[0] > 0:
                             distances = cdist(Michel_coords_pred[current_index], Michel_coords)
                             closest_clusters = Michel_true_clusters[np.argmin(distances, axis=1)]
-                            closest_clusters = closest_clusters[closest_clusters > -1]
-                            if len(closest_clusters) > 0:
-                                closest_true_id = closest_clusters[np.bincount(closest_clusters).argmax()]
+                            closest_clusters_final = closest_clusters[(closest_clusters > -1) & (np.min(distances, axis=1)<2.8284271247461903)]
+                            if len(closest_clusters_final) > 0:
+                                closest_true_id = closest_clusters_final[np.bincount(closest_clusters_final).argmax()]
+                                overlap_pixels_index = (closest_clusters == closest_true_id) & (np.min(distances, axis=1)<2.8284271247461903)
                                 if closest_true_id > -1:
                                     closest_true_index = event_label[predictions==4][current_index]==4
+                                    # closest_true_index = overlap_pixels_index
                                     michel_pred_num_pix_true[-1] = np.count_nonzero(closest_true_index)
                                     michel_pred_sum_pix_true[-1] = event_data[(predictions==4).reshape((-1,)), ...][current_index][(closest_true_index).reshape((-1,)), ...][:, -1].sum()
                                     michel_true_num_pix[-1] = np.count_nonzero(Michel_true_clusters == closest_true_id)
