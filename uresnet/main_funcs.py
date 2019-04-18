@@ -117,12 +117,15 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     loss_seg = np.mean(res['loss_seg'])
     acc_seg  = np.mean(res['accuracy'])
     if 'ppn' in flags.MODEL_NAME:
-        loss_distance = np.mean(res['loss_distance'])
-        loss_class = np.mean(res['loss_class'])
-        loss_ppn1 = np.mean(res['loss_ppn1'])
-        loss_ppn2 = np.mean(res['loss_ppn2'])
-        acc_ppn1 = np.mean(res['acc_ppn1'])
-        acc_ppn2 = np.mean(res['acc_ppn2'])
+        res_dict = {}
+        for key in res:
+            res_dict[key] = np.mean(res[key])
+        # loss_distance = np.mean(res['loss_distance'])
+        # loss_class = np.mean(res['loss_class'])
+        # loss_ppn1 = np.mean(res['loss_ppn1'])
+        # loss_ppn2 = np.mean(res['loss_ppn2'])
+        # acc_ppn1 = np.mean(res['acc_ppn1'])
+        # acc_ppn2 = np.mean(res['acc_ppn2'])
 
     mem = utils.round_decimals(torch.cuda.max_memory_allocated()/1.e9, 3)
 
@@ -141,11 +144,14 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
         handlers.csv_logger.record(('tforward','tsave','tsumforward','tsumsave'),
                                    (tmap['forward'],tmap['save'],tsum_map['forward'],tsum_map['save']))
 
-        handlers.csv_logger.record(('loss_seg','acc_seg'),(loss_seg,acc_seg))
+
         if 'ppn' in flags.MODEL_NAME:
-            handlers.csv_logger.record(('loss_class', 'loss_distance'), (loss_class, loss_distance))
-            handlers.csv_logger.record(('loss_ppn1', 'loss_ppn2'), (loss_ppn1, loss_ppn2))
-            handlers.csv_logger.record(('acc_ppn1', 'acc_ppn2'), (acc_ppn1, acc_ppn2))
+            # handlers.csv_logger.record(('loss_class', 'loss_distance'), (loss_class, loss_distance))
+            # handlers.csv_logger.record(('loss_ppn1', 'loss_ppn2'), (loss_ppn1, loss_ppn2))
+            # handlers.csv_logger.record(('acc_ppn1', 'acc_ppn2'), (acc_ppn1, acc_ppn2))
+            for key in res_dict:
+                handlers.csv_logger.record((key,), (res_dict[key],))
+        handlers.csv_logger.record(('loss_seg','acc_seg'),(loss_seg,acc_seg))
         handlers.csv_logger.write()
 
     # Report (stdout)

@@ -136,26 +136,28 @@ def threadio_func(io_handle, thread_id):
                 #     particles = io_handle.blob()['particles'][idx]
                 #     particles['batch_id'] = data_id
                 #     particles_v[new_id].append(particles)
-                # for key in io_handle._flags.DATA_KEYS:
-                #     blob[key][new_id].append(io_handle.blob()[key][idx])
-                blob[io_handle._flags.DATA_KEYS[0]][new_id].append(io_handle.blob()[io_handle._flags.DATA_KEYS[0]][idx])
-                particles = io_handle.blob()[io_handle._flags.DATA_KEYS[1]][idx]
+                for key in io_handle._flags.DATA_KEYS:
+                    blob[key][new_id].append(io_handle.blob()[key][idx])
+                # blob[io_handle._flags.DATA_KEYS[0]][new_id].append(io_handle.blob()[io_handle._flags.DATA_KEYS[0]][idx])
+                particles = io_handle.blob()['particles'][idx]
                 if len(particles) > 0:
-                    blob[io_handle._flags.DATA_KEYS[1]][new_id].append(np.pad(particles, [(0, 0), (0, 1)], 'constant', constant_values=data_id))
+                    particles_v[new_id].append(np.pad(particles, [(0, 0), (0, 1)], 'constant', constant_values=data_id))
                 else:
                     print("EMPTY PARTICLES", idx)
-                    blob[io_handle._flags.DATA_KEYS[1]][new_id].append(np.empty((0, 5)))
+                    particles_v[new_id].append(np.empty((0, 5)))
                 # if len(io_handle._label):
                 #     label_v.append(io_handle._label[idx])
             blob['voxels']  = [np.vstack(voxel_v[i]) for i in range(num_gpus)]
             blob['feature'] = [np.vstack(feature_v[i]) for i in range(num_gpus)]
             if len(particles_v) > 0:
-                blob['particles'] = particles_v
+                blob['particles'] = [np.vstack(particles_v[i]) for i in range(num_gpus)]
             new_idx_v = [np.array(x) for x in new_idx_v]
             # if len(label_v): label_v = np.hstack(label_v)
             for key in io_handle._flags.DATA_KEYS:
                 blob[key] = [np.vstack(minibatch) for minibatch in blob[key]]
             blob[io_handle._flags.DATA_KEYS[0]] = [np.concatenate([blob['voxels'][i], blob['feature'][i]], axis=1) for i in range(num_gpus)]
+            if len(io_handle._flags.DATA_KEYS) > 1:
+                blob[io_handle._flags.DATA_KEYS[1]] = [np.vstack([blob[io_handle._flags.DATA_KEYS[1]][i], blob['particles'][i].reshape((-1, 1))]) for i in range(num_gpus)]
             io_handle._buffs[thread_id] = (new_idx_v, blob)
             io_handle._locks[thread_id] = True
     return
@@ -291,17 +293,17 @@ class io_larcv_ppn(io_base):
             total_data += np_feature.size
             self._blob['feature'].append(np_feature)
 
-            # # for the rest, different treatment
-            # for key in self._flags.DATA_KEYS[1:]:
-            #     if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
-            #         continue
-            #     br = br_blob[key]
-            #     if self._flags.DATA_DIM == 2:
-            #         br = br.as_vector().front()
-            #     np_data = np.zeros(shape=(num_point,1),dtype=np.float32)
-            #     as_numpy_pcloud(br,np_data)
-            #     total_data += np_data.size
-            #     self._blob[key].append(np_data)
+            # for the rest, different treatment
+            for key in self._flags.DATA_KEYS[1:]:
+                if self._flags.COMPUTE_WEIGHT and key == self._flags.DATA_KEYS[2]:
+                    continue
+                br = br_blob[key]
+                if self._flags.DATA_DIM == 2:
+                    br = br.as_vector().front()
+                np_data = np.zeros(shape=(num_point,1),dtype=np.float32)
+                as_numpy_pcloud(br,np_data)
+                total_data += np_data.size
+                self._blob[key].append(np_data)
             #
             # # if weights need to be computed, compute here using label (index 1)
             # if self._flags.COMPUTE_WEIGHT:
@@ -316,7 +318,7 @@ class io_larcv_ppn(io_base):
             particle_v = br_blob['mcst'].as_vector()
             # part_info = get_particle_info(particle_v)
             part_info = get_ppn_info(particle_v, self._metas[-1])
-            self._blob[self._flags.DATA_KEYS[1]].append(part_info)
+            self._blob['particles'].append(part_info)
 
             total_point  += num_point
             total_sample += 1.

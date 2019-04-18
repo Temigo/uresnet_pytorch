@@ -4,3 +4,5 @@ from uresnet_sparse import UResNet as SparseUResNet
 from uresnet_sparse import SegmentationLoss as SparseSegmentationLoss
 from ppn import PPN
 from ppn import SegmentationLoss as PPNSegmentationLoss
+from ppn_uresnet import PPNUResNet
+from ppn_uresnet import SegmentationLoss as PPNUResNetSegmentationLoss

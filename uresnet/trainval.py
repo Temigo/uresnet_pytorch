@@ -67,8 +67,9 @@ class trainval(object):
                 else:
                     res_combined[key].extend(res[key])
         # Average loss and acc over all the events in this batch
-        res_combined['accuracy'] = np.array(res_combined['accuracy']).sum() / batch_size
-        res_combined['loss_seg'] = np.array(res_combined['loss_seg']).sum() / batch_size
+        for key in res_combined:
+            if key not in ['segmentation', 'softmax']:
+                res_combined[key] = np.array(res_combined[key]).sum() / batch_size
         return res_combined
 
     def _forward(self, data_blob, epoch=None):
@@ -131,6 +132,9 @@ class trainval(object):
         elif self._flags.MODEL_NAME == 'ppn':
             model = models.PPN
             self._criterion = models.PPNSegmentationLoss(self._flags).cuda()
+        elif self._flags.MODEL_NAME == 'ppn_uresnet':
+            model = models.PPNUResNet
+            self._criterion = models.PPNUResNetSegmentationLoss(self._flags).cuda()
         else:
             raise Exception("Unknown model name provided")
 
