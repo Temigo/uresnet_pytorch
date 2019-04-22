@@ -332,7 +332,10 @@ def full_inference_loop(flags, handlers):
             # Store output if requested
             if flags.OUTPUT_FILE:
                 if 'ppn' in flags.MODEL_NAME:
-                    gt = data_blob['label'][0][0][:, :-2]
+                    # TODO Assumes bs = 1
+                    print(len(data_blob['label'][0][0]), len(data_blob['data'][0][0]))
+                    # gt = data_blob['label'][0][0][:, :-2]
+                    gt = np.reshape(data_blob['label'][0][0][data_blob['data'][0][0].shape[0]:], (-1, flags.DATA_DIM+2))[:, :-2]
                     pred = res['segmentation'][0][:, :-2]
                     scores = scipy.special.softmax(res['segmentation'][0][:, -2:], axis=1)
                     voxels = blob['voxels'][0][:, :-1]
@@ -340,15 +343,18 @@ def full_inference_loop(flags, handlers):
                     real_pred = (voxels + 0.5)+pred
                     print(real_pred.shape, scores.shape)
                     csv = utils.CSVData('%s/%s-%05d.csv' % (flags.LOG_DIR, flags.OUTPUT_FILE, handlers.iteration))
+                    # Record all event voxels
                     for i in range(scores.shape[0]):
                         csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 0, scores[i, 1]])
                         csv.write()
                     real_pred = real_pred[scores[:, 1] > 0.6]
                     scores = scores[scores[:, 1] > 0.6]
                     print(real_pred.shape, scores.shape )
+                    # Record predictions
                     for i in range(scores.shape[0]):
                         csv.record(['x', 'y', 'z', 'type', 'score'], [real_pred[i, 0], real_pred[i, 1], real_pred[i, 2], 1, scores[i, 1]])
                         csv.write()
+                    # Record ground truth points
                     for i in range(len(gt)):
                         csv.record(['x', 'y', 'z', 'type', 'score'], [gt[i, 0], gt[i, 1], gt[i, 2], 2, 0.0])
                         csv.write()

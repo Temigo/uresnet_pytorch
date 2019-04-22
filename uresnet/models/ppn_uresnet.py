@@ -23,7 +23,7 @@ class PPNUResNet(torch.nn.Module):
         leakiness = 0
         total_filters = int(m * flags.URESNET_NUM_STRIDES * (flags.URESNET_NUM_STRIDES + 1) / 2)
         def block(m, a, b):
-            #ResNet style blocks
+            # ResNet style blocks
             m.add(scn.ConcatTable()
                   .add(scn.Identity() if a == b else scn.NetworkInNetwork(a, b, False))
                   .add(scn.Sequential()
@@ -32,35 +32,6 @@ class PPNUResNet(torch.nn.Module):
                     .add(scn.BatchNormLeakyReLU(b, leakiness=leakiness))
                     .add(scn.SubmanifoldConvolution(dimension, b, b, 3, False)))
              ).add(scn.AddTable())
-        def U(nPlanes): #Recursive function
-            if len(nPlanes) == 1:
-                m0 = scn.Sequential()
-                for _ in range(reps):
-                    block(m0, nPlanes[0], nPlanes[0])
-                # self.last = m
-                m = scn.ConcatTable().add(m0).add(
-                    scn.SubmanifoldConvolution(dimension, total_filters, total_filters, 3, False))
-                return m
-            else:
-                m = scn.Sequential()
-                for _ in range(reps):
-                    block(m, nPlanes[0], nPlanes[0])
-                u = U(nPlanes[1:])
-                m.add(
-                    scn.ConcatTable().add(
-                        scn.Identity()).add(
-                        scn.Sequential().add(
-                            scn.BatchNormLeakyReLU(nPlanes[0], leakiness=leakiness)).add(
-                            scn.Convolution(dimension, nPlanes[0], nPlanes[1],
-                                downsample[0], downsample[1], False)).add(
-                            u[0]).add(
-                            scn.BatchNormLeakyReLU(nPlanes[1], leakiness=leakiness)).add(
-                            scn.Deconvolution(dimension, nPlanes[1], nPlanes[0],
-                                              downsample[0], downsample[1], False))))
-                m.add(scn.JoinTable())
-                for i in range(reps):
-                    block(m, nPlanes[0] * (2 if i == 0 else 1), nPlanes[0])
-                return m
 
         self.input = scn.Sequential().add(
            scn.InputLayer(dimension, flags.SPATIAL_SIZE, mode=3)).add(
@@ -110,10 +81,8 @@ class PPNUResNet(torch.nn.Module):
         self.half_stride = int(flags.URESNET_NUM_STRIDES/2)
         total_filters = int(m * flags.URESNET_NUM_STRIDES * (flags.URESNET_NUM_STRIDES + 1) / 2)
         self.ppn1_conv = scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 3, False)
-        # self.ppn1_conv.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
-        # self.ppn1_pixel_pred = scn.Sequential().add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], dimension, 1, False))
         self.ppn1_scores = scn.SubmanifoldConvolution(dimension, nPlanes[-1], 2, 3, False)
-        # self.ppn1_unpool = scn.Sequential()#.add(scn.InputLayer(dimension, flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1)), mode=3)).add(scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 1, False))
+
         self.selection1 = Selection()
         self.selection2 = Selection()
         self.unpool1 = scn.Sequential()
@@ -124,18 +93,9 @@ class PPNUResNet(torch.nn.Module):
         for i in range(self.half_stride):
             self.unpool2.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
 
-        # for i in range(flags.URESNET_NUM_STRIDES-half_stride-2):
-        #     self.ppn1_unpool.add(scn.UnPooling(dimension, downsample[0], downsample[1]))
-        # print(self.ppn1_unpool)
-        # self.extract = ExtractFeatureMap(self._flags.URESNET_NUM_STRIDES-self.half_stride-1, dimension, flags.SPATIAL_SIZE/(2**self.half_stride))
         middle_filters = int(m * self.half_stride * (self.half_stride + 1) / 2)
         self.ppn2_conv = scn.SubmanifoldConvolution(dimension, middle_filters, middle_filters, 3, False)
-        # self.ppn2_pixel_pred = scn.SubmanifoldConvolution(dimension, middle_filters, dimension, 3, False)
         self.ppn2_scores = scn.SubmanifoldConvolution(dimension, middle_filters, 2, 3, False)
-        # self.ppn1_pixel_pred = torch.nn.Linear(total_filters, dimension)
-        # self.ppn1_scores = torch.nn.Linear(total_filters, 2)
-        # self.new_tensor = scn.InputBatch(self._flags.DATA_DIM,  flags.SPATIAL_SIZE/(2**(flags.URESNET_NUM_STRIDES-1)))
-        # self.input_tensor = scn.InputBatch(self._flags.DATA_DIM, self._flags.SPATIAL_SIZE)
         self.multiply1 = Multiply()
         self.multiply2 = Multiply()
 
@@ -181,7 +141,7 @@ class PPNUResNet(torch.nn.Module):
             x = self.decoding_blocks[i](x)
 
         x = self.output(x)
-        x = self.linear(x)
+        x = self.linear(x)  # Output of UResNet
 
         # PPN layers
         y = self.ppn1_conv(feature_ppn[-1])
@@ -211,7 +171,7 @@ class PPNUResNet(torch.nn.Module):
         return [[torch.cat([pixel_pred, scores], dim=1)],
                 [torch.cat([ppn1_scores.get_spatial_locations().cuda().float(), ppn1_scores.features], dim=1)],
                 [torch.cat([ppn2_scores.get_spatial_locations().cuda().float(), ppn2_scores.features], dim=1)],
-                x]
+                [x]]
 
 
 class SegmentationLoss(torch.nn.modules.loss._Loss):
@@ -260,13 +220,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 event_ppn1_scores = segmentation[1][i][segmentation[1][i][:, -3] == b.float()][:, -2:]
                 event_ppn2_scores = segmentation[2][i][segmentation[2][i][:, -3] == b.float()][:, -2:]
 
-                # TODO should be segmentation[3][i] here
-                # has to do with 1 vs multiple GPU, batch size etc
-                # multiple input and output
-                # print(segmentation[3].shape, batch_index.shape, event_data.shape)
-                # print(segmentation[3][:5, ...])
-                # print(label[i].shape)
-                event_segmentation = segmentation[3][batch_index]
+                event_segmentation = segmentation[3][i][batch_index]
                 event_label = label[i][:data[i].shape[0]][batch_index]
 
                 # Loss for semantic segmentation
@@ -324,7 +278,9 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
 
         return {
             'accuracy': uresnet_acc,
-            'loss_seg': uresnet_loss,
+            'loss_seg': uresnet_loss + total_loss,
+            'uresnet_acc': uresnet_acc,
+            'uresnet_loss': uresnet_loss,
             'ppn_acc': total_acc,
             'ppn_loss': total_loss,
             'loss_class': total_class,
