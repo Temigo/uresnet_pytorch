@@ -1,1 +1,1 @@
-from iotools import io_factory
+from uresnet.iotools.iotools import io_factory

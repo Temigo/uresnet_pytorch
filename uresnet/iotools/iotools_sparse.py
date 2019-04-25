@@ -103,7 +103,7 @@ def threadio_func(io_handle, thread_id):
             particles_v = []
             # label_v   = []
             blob = {}
-            for key, val in io_handle.blob().iteritems():
+            for key, val in io_handle.blob().items():
                 blob[key] = []
             if io_handle._flags.SHUFFLE:
                 idx_v = np.random.random([batch_per_step])*io_handle.num_entries()
@@ -224,7 +224,7 @@ class io_larcv_sparse(io_base):
         # self._feature = []
         # self._label   = []
         # br_data,br_label=(None,None)
-        ach = ch_blob.values()[0]
+        ach = list(ch_blob.values())[0]
         event_fraction = 1./ach.GetEntries() * 100.
         if self._flags.LIMIT_NUM_SAMPLE > 0:
             event_fraction = 1./self._flags.LIMIT_NUM_SAMPLE * 100.
@@ -235,7 +235,7 @@ class io_larcv_sparse(io_base):
         for entry in range(ach.GetEntries()):
             if self._flags.LIMIT_NUM_SAMPLE > 0 and entry == self._flags.LIMIT_NUM_SAMPLE:
                 break
-            for key, ch in ch_blob.iteritems():
+            for key, ch in ch_blob.items():
                 ch.GetEntry(entry)
                 if entry == 0:
                     if key == 'mcst':

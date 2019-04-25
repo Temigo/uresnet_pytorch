@@ -153,7 +153,7 @@ class URESNET_FLAGS:
         args.func(self)
 
     def update(self, args):
-        for name,value in args.iteritems():
+        for name,value in args.items():
             if name in ['func','script']: continue
             setattr(self, name.upper(), args[name])
         # os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
