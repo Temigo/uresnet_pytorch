@@ -156,8 +156,17 @@ class PPNUResNet(torch.nn.Module):
         attention = self.unpool1(mask)
         if self._flags.TRAIN:
             with torch.no_grad():
-                attention = self.add_labels1(attention, (label/2**self.half_stride).long())
-
+                attention = self.add_labels1(attention, torch.cat([label[:, :-1]/2**self.half_stride, label[:, -1][:, None]], dim=1).long())
+                # for b in range(self._flags.BATCH_SIZE):
+                #     batch_index = attention.get_spatial_locations()[:, -1] == b
+                #     print(attention.features.shape, batch_index.shape)
+                #     if attention.features[batch_index].sum() == 0:
+                #         print(label[label[:, -1] == b])
+                #         print((label/2**self.half_stride).long()[label[:, -1] == b])
+                #         print(attention.features[batch_index])
+                #         print(attention.get_spatial_locations()[batch_index])
+                # print(attention.features[attention.get_spatial_locations()[:, -1] == 11].size())
+                # print(attention.features[attention.get_spatial_locations()[:, -1] == 11][attention.features[attention.get_spatial_locations()[:, -1] == 11]>0])
         if use_encoding:
             y = feature_ppn[self.half_stride]
         else:
@@ -270,6 +279,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
 
                 # PPN stuff
                 event_label = event_particles[event_particles[:, -1] == b][:, :-2]  # (N_gt, 3)
+
                 # distance loss
                 d = self.distances(event_label, event_pixel_pred)
                 d_true = self.distances(event_label, event_data)

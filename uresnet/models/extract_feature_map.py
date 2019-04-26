@@ -30,7 +30,6 @@ class AddLabels(torch.nn.Module):
         # print(positions.max(), label.max())
         for l in label:
             index = (positions == l).all(dim=1)
-            # print(index.long().sum(), l)
             output.features[index] = 1.0
         return output
 
