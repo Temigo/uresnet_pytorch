@@ -458,3 +458,31 @@ def compute_metrics_dense(data_v, label_v, softmax_v, idx_v):
         res['confusion_matrix'].append(confusion_matrix)
         res['energy_confusion_matrix'].append(energy_confusion_matrix)
     return res
+
+
+def nms_numpy(im_proposals, im_scores, threshold, size):
+    dim = im_proposals.shape[-1]
+    coords = []
+    for d in range(dim):
+        coords.append(im_proposals[:, d] - size)
+    for d in range(dim):
+        coords.append(im_proposals[:, d] + size)
+    coords = np.array(coords)
+
+    areas = np.ones_like(coords[0])
+    areas = np.prod(coords[dim:] - coords[0:dim] + 1, axis=0)
+
+    order = im_scores.argsort()[::-1]
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        xx = np.maximum(coords[:dim, i][:, np.newaxis], coords[:dim, order[1:]])
+        yy = np.minimum(coords[dim:, i][:, np.newaxis], coords[dim:, order[1:]])
+        w = np.maximum(0.0, yy - xx + 1)
+        inter = np.prod(w, axis=0)
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+        inds = np.where(ovr <= threshold)[0]
+        order = order[inds + 1]
+
+    return keep

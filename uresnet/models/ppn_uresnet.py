@@ -21,7 +21,6 @@ class PPNUResNet(torch.nn.Module):
         downsample = [kernel_size, 2]# downsample = [filter size, filter stride]
         self.last = None
         leakiness = 0
-        total_filters = int(m * flags.URESNET_NUM_STRIDES * (flags.URESNET_NUM_STRIDES + 1) / 2)
         def block(m, a, b):
             # ResNet style blocks
             m.add(scn.ConcatTable()
@@ -79,7 +78,6 @@ class PPNUResNet(torch.nn.Module):
 
         # PPN stuff
         self.half_stride = int(flags.URESNET_NUM_STRIDES/2)
-        total_filters = int(m * flags.URESNET_NUM_STRIDES * (flags.URESNET_NUM_STRIDES + 1) / 2)
         self.ppn1_conv = scn.SubmanifoldConvolution(dimension, nPlanes[-1], nPlanes[-1], 3, False)
         self.ppn1_scores = scn.SubmanifoldConvolution(dimension, nPlanes[-1], 2, 3, False)
 
@@ -114,6 +112,8 @@ class PPNUResNet(torch.nn.Module):
         label has shape (point_cloud.shape[0] + 5*num_labels, 1)
         label contains segmentation labels for each point + coords of gt points
         """
+        use_encoding = False
+
         point_cloud, label = input
         label = torch.reshape(label[point_cloud.size()[0]:, ...], (-1, self._flags.DATA_DIM+2))
         # Now shape (num_label, 5) for 3 coords + point type + batch id
@@ -133,18 +133,24 @@ class PPNUResNet(torch.nn.Module):
             feature_ppn.append(x)
 
         # U-ResNet decoding
+        feature_ppn2 = [x]
         for i, layer in enumerate(self.decoding_conv):
             # print(i, 'decoding')
             encoding_block = feature_maps[-i-2]
             x = layer(x)
             x = self.concat([encoding_block, x])
             x = self.decoding_blocks[i](x)
+            feature_ppn2.append(x)
 
         x = self.output(x)
         x = self.linear(x)  # Output of UResNet
 
         # PPN layers
-        y = self.ppn1_conv(feature_ppn[-1])
+        if use_encoding:
+            y = self.ppn1_conv(feature_ppn[-1])
+        else:
+            y = self.ppn1_conv(feature_ppn2[0])
+
         ppn1_scores = self.ppn1_scores(y)
         mask = self.selection1(ppn1_scores)
         attention = self.unpool1(mask)
@@ -152,7 +158,11 @@ class PPNUResNet(torch.nn.Module):
             with torch.no_grad():
                 attention = self.add_labels1(attention, (label/2**self.half_stride).long())
 
-        y = feature_ppn[self.half_stride]
+        if use_encoding:
+            y = feature_ppn[self.half_stride]
+        else:
+            y = feature_ppn2[self.half_stride]
+
         y = self.multiply1(y, attention)
         y = self.ppn2_conv(y)
         ppn2_scores = self.ppn2_scores(y)
@@ -161,7 +171,11 @@ class PPNUResNet(torch.nn.Module):
         if self._flags.TRAIN:
             with torch.no_grad():
                 attention2 = self.add_labels2(attention2, label.long())
-        z = feature_ppn[0]
+        if use_encoding:
+            z = feature_ppn[0]
+        else:
+            z = feature_ppn2[-1]
+
         z = self.multiply2(z, attention2)
         z = self.ppn3_conv(z)
         ppn3_pixel_pred = self.ppn3_pixel_pred(z)
@@ -171,7 +185,9 @@ class PPNUResNet(torch.nn.Module):
         return [[torch.cat([pixel_pred, scores], dim=1)],
                 [torch.cat([ppn1_scores.get_spatial_locations().cuda().float(), ppn1_scores.features], dim=1)],
                 [torch.cat([ppn2_scores.get_spatial_locations().cuda().float(), ppn2_scores.features], dim=1)],
-                [x]]
+                [x],
+                [attention.features],
+                [attention2.features]]
 
 
 class SegmentationLoss(torch.nn.modules.loss._Loss):
@@ -204,24 +220,37 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
         total_loss_ppn1, total_loss_ppn2 = 0., 0.
         total_acc_ppn1, total_acc_ppn2 = 0., 0.
         uresnet_loss, uresnet_acc = 0., 0.
-        # Loop over ?
-        # print(len(segmentation), len(segmentation[3]))
         for i in range(len(data)):
             event_particles = label[i][data[i].shape[0]:].reshape((-1, self._flags.DATA_DIM+2))
             for b in batch_ids[i].unique():
                 batch_index = batch_ids[i] == b
                 event_data = data[i][batch_index][:, :-2]  # (N, 3)
-                event_ppn1_data = segmentation[1][i][segmentation[1][i][:, -3] == b.float()][:, :-3]
-                event_ppn2_data = segmentation[2][i][segmentation[2][i][:, -3] == b.float()][:, :-3]
+                ppn1_batch_index = segmentation[1][i][:, -3] == b.float()
+                ppn2_batch_index = segmentation[2][i][:, -3] == b.float()
+                event_ppn1_data = segmentation[1][i][ppn1_batch_index][:, :-3]  # (N1, 3)
+                event_ppn2_data = segmentation[2][i][ppn2_batch_index][:, :-3]  # (N2, 3)
                 anchors = (event_data + 0.5).float()
 
                 event_pixel_pred = segmentation[0][i][batch_index][:, :-2] + anchors # (N, 3)
                 event_scores = segmentation[0][i][batch_index][:, -2:]  # (N, 2)
-                event_ppn1_scores = segmentation[1][i][segmentation[1][i][:, -3] == b.float()][:, -2:]
-                event_ppn2_scores = segmentation[2][i][segmentation[2][i][:, -3] == b.float()][:, -2:]
+                event_ppn1_scores = segmentation[1][i][ppn1_batch_index][:, -2:]  # (N1, 2)
+                event_ppn2_scores = segmentation[2][i][ppn2_batch_index][:, -2:]  # (N2, 2)
 
-                event_segmentation = segmentation[3][i][batch_index]
-                event_label = label[i][:data[i].shape[0]][batch_index]
+                event_segmentation = segmentation[3][i][batch_index]  # (N, num_classes)
+                event_label = label[i][:data[i].shape[0]][batch_index]  # (N, 1)
+
+                # Mask: only consider pixels that were selected
+                event_mask = segmentation[5][i][batch_index]
+                event_mask = (~(event_mask == 0)).any(dim=1)  # (N,)
+                event_label = event_label[event_mask]
+                event_segmentation = event_segmentation[event_mask]
+                event_pixel_pred = event_pixel_pred[event_mask]
+                event_scores = event_scores[event_mask]
+                event_data = event_data[event_mask]
+                # Mask for PPN2
+                event_ppn2_mask = (~(segmentation[4][i][ppn2_batch_index] == 0)).any(dim=1)
+                event_ppn2_data = event_ppn2_data[event_ppn2_mask]
+                event_ppn2_scores = event_ppn2_scores[event_ppn2_mask]
 
                 # Loss for semantic segmentation
                 event_label = torch.squeeze(event_label, dim=-1).long()

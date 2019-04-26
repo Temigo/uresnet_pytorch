@@ -339,17 +339,20 @@ def full_inference_loop(flags, handlers):
                     pred = res['segmentation'][0][:, :-2]
                     scores = scipy.special.softmax(res['segmentation'][0][:, -2:], axis=1)
                     voxels = blob['voxels'][0][:, :-1]
-                    print(voxels[:10], scores[:10])
+                    # print(voxels[:10], scores[:10])
                     real_pred = (voxels + 0.5)+pred
-                    print(real_pred.shape, scores.shape)
+                    # print(real_pred.shape, scores.shape)
                     csv = utils.CSVData('%s/%s-%05d.csv' % (flags.LOG_DIR, flags.OUTPUT_FILE, handlers.iteration))
                     # Record all event voxels
                     for i in range(scores.shape[0]):
                         csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 0, scores[i, 1]])
                         csv.write()
-                    real_pred = real_pred[scores[:, 1] > 0.6]
-                    scores = scores[scores[:, 1] > 0.6]
-                    print(real_pred.shape, scores.shape )
+                    # keep = utils.nms_numpy(real_pred, scores[:, 1], 0.5, 2)
+
+                    threshold = -1#0.6
+                    real_pred = real_pred[scores[:, 1] > threshold]
+                    scores = scores[scores[:, 1] > threshold]
+                    # print(real_pred.shape, scores.shape )
                     # Record predictions
                     for i in range(scores.shape[0]):
                         csv.record(['x', 'y', 'z', 'type', 'score'], [real_pred[i, 0], real_pred[i, 1], real_pred[i, 2], 1, scores[i, 1]])
