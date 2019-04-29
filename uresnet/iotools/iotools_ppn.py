@@ -241,6 +241,12 @@ class io_larcv_ppn(io_base):
                     else:
                         br_blob[key] = getattr(ch, '%s_%s_branch' % (dtype_keyword, key))
 
+            particle_v = br_blob['mcst'].as_vector()
+            # part_info = get_particle_info(particle_v)
+            part_info = get_ppn_info(particle_v, as_meta(br_blob[self._flags.DATA_KEYS[0]].meta()))
+            if len(part_info) == 0:  # skip events without gt pixels
+                continue
+            self._blob['particles'].append(part_info)
 
             # ch_data.GetEntry(i)
             # if ch_label:  ch_label.GetEntry(i)
@@ -314,11 +320,6 @@ class io_larcv_ppn(io_base):
             #         idx = np.where(labels == float(c))[0]
             #         weights[idx] = float(len(labels))/(len(classes))/counts[c]
             #     self._blob[self._flags.DATA_KEYS[2]].append(weights)
-
-            particle_v = br_blob['mcst'].as_vector()
-            # part_info = get_particle_info(particle_v)
-            part_info = get_ppn_info(particle_v, self._metas[-1])
-            self._blob['particles'].append(part_info)
 
             total_point  += num_point
             total_sample += 1.

@@ -248,19 +248,6 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 event_segmentation = segmentation[3][i][batch_index]  # (N, num_classes)
                 event_label = label[i][:data[i].shape[0]][batch_index]  # (N, 1)
 
-                # Mask: only consider pixels that were selected
-                event_mask = segmentation[5][i][batch_index]
-                event_mask = (~(event_mask == 0)).any(dim=1)  # (N,)
-                event_label = event_label[event_mask]
-                event_segmentation = event_segmentation[event_mask]
-                event_pixel_pred = event_pixel_pred[event_mask]
-                event_scores = event_scores[event_mask]
-                event_data = event_data[event_mask]
-                # Mask for PPN2
-                event_ppn2_mask = (~(segmentation[4][i][ppn2_batch_index] == 0)).any(dim=1)
-                event_ppn2_data = event_ppn2_data[event_ppn2_mask]
-                event_ppn2_scores = event_ppn2_scores[event_ppn2_mask]
-
                 # Loss for semantic segmentation
                 event_label = torch.squeeze(event_label, dim=-1).long()
                 loss_seg = self.cross_entropy(event_segmentation, event_label)
@@ -279,6 +266,19 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
 
                 # PPN stuff
                 event_label = event_particles[event_particles[:, -1] == b][:, :-2]  # (N_gt, 3)
+
+                # Mask: only consider pixels that were selected
+                event_mask = segmentation[5][i][batch_index]
+                event_mask = (~(event_mask == 0)).any(dim=1)  # (N,)
+                # event_label = event_label[event_mask]
+                # event_segmentation = event_segmentation[event_mask]
+                event_pixel_pred = event_pixel_pred[event_mask]
+                event_scores = event_scores[event_mask]
+                event_data = event_data[event_mask]
+                # Mask for PPN2
+                event_ppn2_mask = (~(segmentation[4][i][ppn2_batch_index] == 0)).any(dim=1)
+                event_ppn2_data = event_ppn2_data[event_ppn2_mask]
+                event_ppn2_scores = event_ppn2_scores[event_ppn2_mask]
 
                 # distance loss
                 d = self.distances(event_label, event_pixel_pred)
