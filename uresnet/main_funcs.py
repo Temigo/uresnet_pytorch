@@ -119,7 +119,8 @@ def log(handlers, tstamp_iteration, tspent_iteration, tsum, res, flags, epoch):
     if 'ppn' in flags.MODEL_NAME:
         res_dict = {}
         for key in res:
-            res_dict[key] = np.mean(res[key])
+            if key not in ['segmentation', 'uresnet', 'softmax']:
+                res_dict[key] = np.mean(res[key])
         # loss_distance = np.mean(res['loss_distance'])
         # loss_class = np.mean(res['loss_class'])
         # loss_ppn1 = np.mean(res['loss_ppn1'])
@@ -333,23 +334,36 @@ def full_inference_loop(flags, handlers):
             if flags.OUTPUT_FILE:
                 if 'ppn' in flags.MODEL_NAME:
                     # TODO Assumes bs = 1
-                    print(len(data_blob['label'][0][0]), len(data_blob['data'][0][0]))
+                    print(res['uresnet'])
+                    print(len(data_blob['label'][0][0]), data_blob['data'][0][0].shape)
                     # gt = data_blob['label'][0][0][:, :-2]
                     gt = np.reshape(data_blob['label'][0][0][data_blob['data'][0][0].shape[0]:], (-1, flags.DATA_DIM+2))[:, :-2]
                     pred = res['segmentation'][0][:, :-2]
                     scores = scipy.special.softmax(res['segmentation'][0][:, -2:], axis=1)
                     voxels = blob['voxels'][0][:, :-1]
+                    segmentation = np.argmax(res['uresnet'][0], axis=1)
+                    print(segmentation, data_blob['label'][0][0].shape)
                     # print(voxels[:10], scores[:10])
                     real_pred = (voxels + 0.5)+pred
                     # print(real_pred.shape, scores.shape)
                     csv = utils.CSVData('%s/%s-%05d.csv' % (flags.LOG_DIR, flags.OUTPUT_FILE, handlers.iteration))
                     # Record all event voxels
                     for i in range(scores.shape[0]):
-                        csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 0, scores[i, 1]])
+                        csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 0, data_blob['data'][0][0][i, -1]])
                         csv.write()
-                    # keep = utils.nms_numpy(real_pred, scores[:, 1], 0.5, 2)
+                    keep = utils.nms_numpy(real_pred, scores[:, 1], 0.01, 5)
+                    real_pred = real_pred[keep]
+                    scores = scores[keep]
+                    # Record uresnet output
+                    for i in range(segmentation.shape[0]):
+                        csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 3, segmentation[i]])
+                        csv.write()
+                    # Record uresnet labels
+                    for i in range(segmentation.shape[0]):
+                        csv.record(['x', 'y', 'z', 'type', 'score'], [voxels[i, 0], voxels[i, 1], voxels[i, 2], 4, data_blob['label'][0][0][i, -1]])
+                        csv.write()
 
-                    threshold = -1#0.6
+                    threshold = 0.6
                     real_pred = real_pred[scores[:, 1] > threshold]
                     scores = scores[scores[:, 1] > threshold]
                     # print(real_pred.shape, scores.shape )

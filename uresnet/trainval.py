@@ -68,7 +68,7 @@ class trainval(object):
                     res_combined[key].extend(res[key])
         # Average loss and acc over all the events in this batch
         for key in res_combined:
-            if key not in ['segmentation', 'softmax']:
+            if key not in ['segmentation', 'softmax', 'uresnet']:
                 res_combined[key] = np.array(res_combined[key]).sum() / batch_size
         return res_combined
 
@@ -114,6 +114,8 @@ class trainval(object):
                 'segmentation': [s.cpu().detach().numpy() for s in segmentation[0]],
                 'softmax': [self._softmax(s).cpu().detach().numpy() for s in segmentation[0]],
             }
+            if 'ppn' in self._flags.MODEL_NAME:
+                res['uresnet'] = [self._softmax(s).cpu().detach().numpy() for s in segmentation[3]]
             for label in loss_acc:
                 res[label] = [loss_acc[label].cpu().item() if not isinstance(loss_acc[label], float) else loss_acc[label]]
             self.tspent['forward'] = time.time() - tstart
